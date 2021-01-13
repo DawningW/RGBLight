@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8"> 
+        <title>RGBLight Management</title>
+        <style type="text/css">
+
+        </style>
+    </head>
+    <body>
+        <div id="container" style="margin: 0;">
+            <h1 style="text-align: center;">RGBLight Management Page</h1>
+            <code id="log" style="height: 200px;">Log: </code>
+            <div id="controller" style="margin: 0;">
+                R: <input id="r" type="range" min="0" max="255" step="1" oninput="updateRGB();"/>
+                G: <input id="g" type="range" min="0" max="255" step="1" oninput="updateRGB();"/>
+                B: <input id="b" type="range" min="0" max="255" step="1" oninput="updateRGB();"/>
+                <button id="submit" onclick="sendRGB()">提交</button>
+            </div>
+        </div>
+
+        <script>
+            var connection = new WebSocket("ws://" + location.hostname + ":81/", ["arduino"]);
+            connection.onopen = function() {
+                connection.send("Connect " + new Date());
+            };
+            connection.onerror = function(error) {
+                console.log("WebSocket Error ", error);
+            };
+            connection.onmessage = function(e) {
+                console.log("Server: ", e.data);
+            };
+
+            var color = 0xFFFFFF;
+
+            function updateRGB() {
+
+
+                return;
+            }
+
+            function sendRGB() {
+                var r = parseInt(document.getElementById("r").value);
+                var g = parseInt(document.getElementById("g").value);
+                var b = parseInt(document.getElementById("b").value);
+                var rgb = convertRGBToStr(r, g, b);
+                console.log("RGB: " + rgb);
+                connection.send(rgb);
+            }
+
+            function convertRGBToStr(r, g, b) {
+                r = r.toString(16);
+                g = g.toString(16);
+                b = b.toString(16);
+                if (r.length < 2) {
+                    r = "0" + r;
+                }
+                if (g.length < 2) {
+                    g = "0" + g;
+                }
+                if (b.length < 2) {
+                    b = "0" + b;
+                }
+                return "#" + r + g + b;
+            }
+        </script>
+    </body>
+</html>

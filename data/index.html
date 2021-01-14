@@ -17,6 +17,9 @@
                 B: <input id="b" type="range" min="0" max="255" step="1" oninput="updateRGB();"/>
                 <button id="submit" onclick="sendRGB()">提交</button>
             </div>
+            <p>LED开关: </p>
+            <button id="open" onclick="send('y')">开启</button>
+            <button id="close" onclick="send('n');">关闭</button>
         </div>
 
         <script>
@@ -31,6 +34,11 @@
                 console.log("Server: ", e.data);
             };
 
+            function send(str) {
+                console.log("Send data: " + str);
+                connection.send(str);
+            }
+
             var color = 0xFFFFFF;
 
             function updateRGB() {
@@ -44,8 +52,7 @@
                 var g = parseInt(document.getElementById("g").value);
                 var b = parseInt(document.getElementById("b").value);
                 var rgb = convertRGBToStr(r, g, b);
-                console.log("RGB: " + rgb);
-                connection.send(rgb);
+                send(rgb);
             }
 
             function convertRGBToStr(r, g, b) {

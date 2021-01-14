@@ -10,13 +10,17 @@
 #include "ESP8266mDNS.h"
 #include "ESP8266WebServer.h"
 #include "WebSocketsServer.h"
+#include "ArduinoJson.h"
 #define FASTLED_ESP8266_NODEMCU_PIN_ORDER
 // #define FASTLED_HAS_CLOCKLESS
 #include "FastLED.h"
-#include "ArduinoJson.h"
 
+#include <vector>
+
+#define _DEBUG
+#ifdef _DEBUG
 #include <GDBStub.h>
-//#include <vector.h>
+#endif
 
 // LED_BUILTIN GPIO2/TXD // Cannot use Serial and the blue LED at the same time
 #define POWER_LED_PIN 5 // D1 GPIO5
@@ -41,7 +45,7 @@ struct Config {
     LightType mode;
     byte brightness;
     int fps;
-//    vector<int> animation;
+    vector<int> animation;
 } config;
 
 Ticker timer;
@@ -162,7 +166,13 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
         }
         case WStype_TEXT: {
             Serial.printf("[%u] get Text: %s\r\n", num, payload);
+            if (payload[0] == 'y') {
+                digitalWrite(POWER_LED_PIN, HIGH);
+            } else if (payload[0] == 'n') {
+                digitalWrite(POWER_LED_PIN, LOW);
+            }
 
+            /*
             if (payload[0] == '#') {
                 // we get RGB data
 
@@ -170,6 +180,7 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
                 uint32_t rgb = (uint32_t) strtol((const char *) &payload[1], NULL, 16);
                 Serial.printf("Received data: %d\r\n", rgb);
             }
+            */
             break;
         }
     }
@@ -192,7 +203,6 @@ bool startServer(const char* domain) {
 }
 
 void playLight() {
-    Serial.print(".");
     // FastLED.show();
 }
 
@@ -206,12 +216,14 @@ void initLight() {
 void setup() {
     pinMode(POWER_LED_PIN, OUTPUT);
     pinMode(COLOR_LED_PIN, OUTPUT);
-    digitalWrite(POWER_LED_PIN, LOW);
+    digitalWrite(POWER_LED_PIN, HIGH);
 
     Serial.begin(9600);
     Serial.println();
-
+#ifdef _DEBUG
+    Serial.setDebugOutput(true);
     gdbstub_init();
+#endif
 
     LittleFS.begin();
     bool isInited = LittleFS.exists("/config.json");

@@ -73,13 +73,28 @@
         </script>
     </head>
     <body>
-        <div id="container" style="height: 600px; margin: 0;">
+        <div id="container" style="margin: 0;">
             <h1 style="text-align: center;">RGBLight Management Page</h1>
-            <code id="log" style="height: 200px;">Log: </code>
-            <br />
-            <div id="colorpicker" class="cp-default"></div>
-            <br />
+
+            <div id="console" style="margin: 0;">
+                <div id="log" style="height: 400px;">Log: </div>
+                <input id="command" type="text" />
+                <button id="send" onclick="sendCommand()">发送</button>
+            </div>
+
+            <div id="mode" style="margin: 0;">
+                <button id="0" onclick="send('mode static')">静止</button>
+                <button id="1" onclick="send('mode blink')">闪烁</button>
+                <button id="2" onclick="send('mode breathe')">呼吸</button>
+                <button id="3" onclick="send('mode chase')">跑马灯</button>
+                <button id="4" onclick="send('mode rainbow')">彩虹</button>
+                <button id="5" onclick="send('mode stream')">流光</button>
+                <button id="6" onclick="send('mode animation')">自定义动画</button>
+                <button id="7" onclick="send('mode custom')">上位机控制/测试</button>
+            </div>
+
             <div id="controller" style="margin: 0;">
+                <div id="colorpicker" class="cp-default"></div>
                 Brightness: <input id="brightness" type="range" min="0" max="255" step="1" />
                 <br />
                 R: <input id="r" type="number" min="0" max="255" step="1" oninput="updateRGB()" />
@@ -92,6 +107,29 @@
         </div>
 
         <script>
+            var logCount = 0;
+            function printLog(msg) {
+                if (++logCount > 17) {
+                    document.getElementById("log").innerHTML = "Log:";
+                    logCount = 0;
+                }
+                document.getElementById("log").innerHTML += "<br\>" + msg;
+            }
+            function sendCommand() {
+                var cmd = document.getElementById("command").value;
+                if (cmd != undefined && cmd != "") {
+                    document.getElementById("command").value = "";
+                    send(cmd);
+                }
+            }
+            document.onkeydown = function(e) {
+                var theEvent = window.event || e;
+                var code = theEvent.keyCode || theEvent.which || theEvent.charCode;
+                if (code == 13) {
+                    sendCommand();
+                }
+            }
+
             var cp = ColorPicker(
                 document.getElementById("colorpicker"),
                 function(hex, hsv, rgb) {
@@ -103,24 +141,6 @@
                     document.getElementById("b").value = rgb.b;
                     send("color " + hex);
             });
-
-            var connection = new WebSocket("ws://" + location.hostname + ":81/", ["arduino"]);
-            connection.onopen = function() {
-                connection.send("Connect at " + new Date());
-                send("color");
-            };
-            connection.onerror = function(error) {
-                console.log("WebSocket error: ", error);
-            };
-            connection.onmessage = function(msg) {
-                console.log("Received message: ", msg.data);
-                if (msg.data[0] == '#')
-                    cp.setHex(msg.data);
-            };
-            function send(msg) {
-                console.log("Send message: " + msg);
-                connection.send(msg);
-            }
 
             function updateRGB() {
                 var r = parseInt(document.getElementById("r").value);
@@ -151,6 +171,29 @@
                     b = "0" + b;
                 }
                 return "#" + r + g + b;
+            }
+
+            var connection = new WebSocket("ws://" + location.hostname + ":81/", ["arduino"]);
+            connection.onopen = function() {
+                var date = new Date().toLocaleString();
+                console.log("Connected at " + date);
+                printLog("已于 " + date + " 成功与 " + location.hostname + ":81" + " 建立连接!");
+                send("color");
+            };
+            connection.onerror = function(error) {
+                console.log("WebSocket error: ", error);
+                printLog("错误: " + error);
+            };
+            connection.onmessage = function(msg) {
+                console.log("Received message: ", msg.data);
+                printLog("接收: " + msg.data);
+                if (msg.data[0] == '#')
+                    cp.setHex(msg.data);
+            };
+            function send(msg) {
+                console.log("Send message: " + msg);
+                printLog("发送: " + msg);
+                connection.send(msg);
             }
         </script>
     </body>

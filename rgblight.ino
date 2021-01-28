@@ -30,7 +30,7 @@
 #else
 #define NAME "RGBLight"
 #endif
-#define VERSION "V0.2"
+#define VERSION "V0.3"
 
 // LED_BUILTIN GPIO2/TXD D4 // Cannot use Serial and the blue LED at the same time
 #define POWER_LED_PIN 5 // GPIO5 D1
@@ -73,12 +73,21 @@ WebSocketsServer wsServer(81);
 
 CRGB leds[LED_COUNT];
 uint16_t currentFrame = 0;
+CRGB currentColor = CRGB::White;
+uint8_t currentHue = 0;
 
 String serialBuffer = "";
 
-uint32_t rgb2hex(int r, int g, int b)
-{   
+uint32_t rgb2hex(int r, int g, int b) {   
     return ((r & 0xff) << 16) + ((g & 0xff) << 8) + (b & 0xff);
+}
+
+uint32_t str2hex(const char *str) {
+    return (uint32_t) strtol(str, NULL, 16);
+}
+
+void hex2str(uint32_t hex, char *str) {
+    sprintf(str, "#%06x", hex);
 }
 
 void readSettings() {
@@ -186,6 +195,25 @@ bool openHotspot() {
     return result;
 }
 
+void setBrightness(uint8_t brightness) {
+    FastLED.setBrightness(brightness);
+    config.brightness = brightness;
+    markDirty();
+}
+
+void setRefreshRate(uint8_t rate) {
+    currentFrame = 0;
+    if (timer.active()) timer.detach();
+    timer.attach_ms(1000 / rate, updateLight);
+    config.refreshRate = rate;
+    markDirty();
+}
+
+void setMode(LightType type) {
+    config.mode = type;
+    markDirty();
+}
+
 void sendMessage(int receiver, const char *msg) {
     // TODO 先这样吧
     if (receiver == -1) {
@@ -217,8 +245,26 @@ void commandHandler(int sender, String &msg) {
             if (strcmp(argv[1], "static") == 0) {
                 config.mode = STATIC;
             }
+            else if (strcmp(argv[1], "blink") == 0) {
+                config.mode = BLINK;
+            }
+            else if (strcmp(argv[1], "breathe") == 0) {
+                config.mode = BREATHE;
+            }
+            else if (strcmp(argv[1], "chase") == 0) {
+                config.mode = CHASE;
+            }
+            else if (strcmp(argv[1], "rainbow") == 0) {
+                config.mode = RAINBOW;
+            }
             else if (strcmp(argv[1], "stream") == 0) {
                 config.mode = STREAM;
+            }
+            else if (strcmp(argv[1], "animation") == 0) {
+                config.mode = ANIMATION;
+            }
+            else if (strcmp(argv[1], "custom") == 0) {
+                config.mode = CUSTOM;
             }
             markDirty();
         }
@@ -231,18 +277,15 @@ void commandHandler(int sender, String &msg) {
     else if (strcmp(argv[0], "color") == 0) {
         if (argc > 1) {
             // 设置灯的颜色
-            uint32_t rgb = (uint32_t) strtol(&argv[1][1], NULL, 16);
-            CRGB color(rgb);
-            for (int i = 0; i < LED_COUNT; ++i) {
-                leds[i] = color;
-            }
+            uint32_t hex = str2hex(&argv[1][1]);
+            currentColor = CRGB(hex);
             markDirty();
         }
         else {
             // 获取灯的颜色
-            uint32_t hex = rgb2hex(leds[0].r, leds[0].g, leds[0].b);
+            uint32_t hex = rgb2hex(currentColor.r, currentColor.g, currentColor.b);
             char str[8];
-            sprintf(str, "#%06x", hex);
+            hex2str(hex, str);
             sendMessage(sender, str);
         }
     }
@@ -317,41 +360,48 @@ void webSocketHandler(uint8_t num, WStype_t type, uint8_t *payload, size_t lengt
     }
 }
 
-uint8_t currentHue = 0;
-
 void updateLight() {
-    if (++currentFrame > config.refreshRate) currentFrame = 0;
-    // TODO 灯板刷新
+    if (++currentFrame >= config.refreshRate) currentFrame = 0;
     if (config.mode == STATIC) {
-
+        if (leds[0] != currentColor) {
+            fill_solid(leds, LED_COUNT, currentColor);
+        }
+    }
+    else if (config.mode == BLINK) {
+        if (currentFrame == 0) {
+            fill_solid(leds, LED_COUNT, currentColor);
+        }
+        else if (currentFrame == config.refreshRate / 2) {
+            fill_solid(leds, LED_COUNT, CRGB::Black);
+        }
+    }
+    else if (config.mode == BREATHE) {
+        CRGB rgb = currentColor;
+        int temp = 255 - 510 * currentFrame / config.refreshRate;
+        rgb.nscale8(abs(temp));
+        fill_solid(leds, LED_COUNT, rgb);
+    }
+    else if (config.mode == CHASE) {
+        // fill_gradient_HSV(leds, LED_COUNT, c1, c2);
     }
     else if (config.mode == RAINBOW) {
-
+        CHSV hsv(currentHue++, 255, 240);
+        CRGB rgb;
+        hsv2rgb_rainbow(hsv, rgb);
+        fill_solid(leds, LED_COUNT, rgb);
+        if (currentHue > 255) currentHue -= 255;
     }
     else if (config.mode == STREAM) {
-        // fill_gradient_HSV(leds, LED_COUNT, c1, c2);
         fill_rainbow(leds, LED_COUNT, currentHue++);
+        if (currentHue > 255) currentHue -= 255;
+    }
+    else if (config.mode == ANIMATION) {
+
+    }
+    else if (config.mode == CUSTOM) {
+
     }
     FastLED.show();
-}
-
-void setBrightness(uint8_t brightness) {
-    FastLED.setBrightness(brightness);
-    config.brightness = brightness;
-    markDirty();
-}
-
-void setRefreshRate(uint8_t rate) {
-    currentFrame = 0;
-    if (timer.active()) timer.detach();
-    timer.attach_ms(1000 / rate, updateLight);
-    config.refreshRate = rate;
-    markDirty();
-}
-
-void setMode(LightType type) {
-    config.mode = type;
-    markDirty();
 }
 
 void setup() {
@@ -382,7 +432,6 @@ void setup() {
 
     FastLED.setBrightness(config.brightness);
     timer.attach_ms(1000 / config.refreshRate, updateLight);
-    fill_solid(leds, LED_COUNT, CRGB::White);
 
     if (connectWifi(config.ssid, config.password)) {
         WiFi.mode(WIFI_STA);

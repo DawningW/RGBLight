@@ -6,7 +6,7 @@
 
 MCU:
 
-ESP-12F
+ESP-12F 4MB Flash 80KB RAM
 
 外围设备:
 
@@ -20,7 +20,7 @@ WS2801的LED灯板
 
 第三方库:
 
-ESP8266 Arduino Core (ESP8266WiFi Ticker LittleFS)
+ESP8266 Arduino Core
 
 FastLED
 
@@ -28,6 +28,7 @@ ArduinoJson
 
 arduinoWebSockets
 
+PS: 如果在配置VSCode开发环境时遇见头文件丢失的问题可参考https://github.com/microsoft/vscode-arduino/issues/438(然而并不好用)
 
 祝姐姐妹妹生日快乐!
 

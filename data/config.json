@@ -2,6 +2,6 @@
     "ssid": "",
     "password": "",
     "mode": 0,
-    "brightness": 10,
-    "fps": 20
+    "brightness": 50,
+    "refreshRate": 60
 }

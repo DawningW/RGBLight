@@ -75,6 +75,7 @@ CRGB leds[LED_COUNT];
 uint16_t currentFrame = 0;
 CRGB currentColor = CRGB::White;
 uint8_t currentHue = 0;
+bool reversed = false;
 
 String serialBuffer = "";
 
@@ -382,7 +383,15 @@ void updateLight() {
         fill_solid(leds, LED_COUNT, rgb);
     }
     else if (config.mode == CHASE) {
-        // fill_gradient_HSV(leds, LED_COUNT, c1, c2);
+        fill_solid(leds, LED_COUNT, CRGB::Black);
+        int led = LED_COUNT * currentFrame / config.refreshRate;
+        if (!reversed) {
+            leds[led] = currentColor;
+        }
+        else {
+            leds[LED_COUNT - 1 - led] = currentColor;
+        }
+        if (currentFrame == config.refreshRate - 1) reversed = !reversed;
     }
     else if (config.mode == RAINBOW) {
         CHSV hsv(currentHue++, 255, 240);

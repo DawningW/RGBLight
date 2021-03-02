@@ -77,7 +77,7 @@
             <h1 style="text-align: center;">RGBLight Management Page</h1>
 
             <div id="console" style="margin: 0;">
-                <div id="log" style="height: 400px;">Log: </div>
+                <textarea id="log" style="width: 100%; height: 400px;" readonly="true">Log: </textarea>
                 <input id="command" type="text" />
                 <button id="send" onclick="sendCommand()">发送</button>
             </div>
@@ -95,13 +95,13 @@
 
             <div id="controller" style="margin: 0;">
                 <div id="colorpicker" class="cp-default"></div>
-                Brightness: <input id="brightness" type="range" min="0" max="255" step="1" />
+                Brightness: <input id="brightness" type="range" min="0" max="200" step="1" oninput="updateBrightness()" />
                 <br />
                 R: <input id="r" type="number" min="0" max="255" step="1" oninput="updateRGB()" />
                 G: <input id="g" type="number" min="0" max="255" step="1" oninput="updateRGB()" />
                 B: <input id="b" type="number" min="0" max="255" step="1" oninput="updateRGB()" />
                 <br />
-                <button id="get" onclick="send('color')">获取</button>
+                <button id="get" onclick="send('color'), send('brightness')">获取</button>
                 <button id="set" onclick="sendRGB()">设置</button>
             </div>
         </div>
@@ -109,11 +109,11 @@
         <script>
             var logCount = 0;
             function printLog(msg) {
-                if (++logCount > 17) {
+                if (++logCount > 50) {
                     document.getElementById("log").innerHTML = "Log:";
                     logCount = 0;
                 }
-                document.getElementById("log").innerHTML += "<br\>" + msg;
+                document.getElementById("log").innerHTML += "\n" + msg;
             }
             function sendCommand() {
                 var cmd = document.getElementById("command").value;
@@ -173,12 +173,18 @@
                 return "#" + r + g + b;
             }
 
+            function updateBrightness() {
+                var brightness = document.getElementById("brightness").value;
+                send("brightness " + brightness);
+            }
+
             var connection = new WebSocket("ws://" + location.hostname + ":81/", ["arduino"]);
             connection.onopen = function() {
                 var date = new Date().toLocaleString();
                 console.log("Connected at " + date);
                 printLog("已于 " + date + " 成功与 " + location.hostname + ":81" + " 建立连接!");
                 send("color");
+                send("brightness");
             };
             connection.onerror = function(error) {
                 console.log("WebSocket error: ", error);
@@ -189,6 +195,8 @@
                 printLog("接收: " + msg.data);
                 if (msg.data[0] == '#')
                     cp.setHex(msg.data);
+                else if (!isNaN(msg.data))
+                    document.getElementById("brightness").value = parseInt(msg.data);
             };
             function send(msg) {
                 console.log("Send message: " + msg);

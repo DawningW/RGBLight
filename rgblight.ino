@@ -290,6 +290,23 @@ void commandHandler(int sender, String &msg) {
             sendMessage(sender, str);
         }
     }
+    else if (strcmp(argv[0], "brightness") == 0) {
+        if (argc > 1) {
+            // 设置灯的亮度
+            int brightness = atoi(argv[1]);
+            if (brightness >= 0 && brightness <= 255) {
+                setBrightness((uint8_t) brightness);
+            } else {
+                sendMessage(sender, "Invaild brightness");
+            }
+        }
+        else {
+            // 获取灯的亮度
+            char str[4];
+            itoa(config.brightness, str, 10);
+            sendMessage(sender, str);
+        }
+    }
     else if (strcmp(argv[0], "scan") == 0) {
         String result = scanWifi();
         sendMessage(sender, result.c_str());

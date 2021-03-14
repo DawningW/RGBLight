@@ -350,6 +350,16 @@ void webServerHandler() {
     }
 }
 
+void webServerHandler2() {
+    if (LittleFS.exists("/bundle.js")) {
+        File file = LittleFS.open("/bundle.js", "r");
+        webServer.streamFile(file, "text/javascript");
+        file.close();
+    } else {
+        webServer.send(404, "text/plain", "bundle.js not found.");
+    }
+}
+
 void webSocketHandler(uint8_t num, WStype_t type, uint8_t *payload, size_t length) {
     switch (type) {
         case WStype_CONNECTED: {
@@ -472,6 +482,7 @@ void setup() {
 
     Serial.println(F("Start web server."));
     webServer.on("/", webServerHandler);
+    webServer.on("/bundle.js", webServerHandler2);
     webServer.begin();
     Serial.println(F("Start web socket server."));
     wsServer.onEvent(webSocketHandler);

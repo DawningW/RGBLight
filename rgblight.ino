@@ -312,9 +312,9 @@ void commandHandler(int sender, String &msg) {
         sendMessage(sender, result.c_str());
     }
     else if (strcmp(argv[0], "connect") == 0) {
-        if (argc >= 3) {
+        if (argc >= 2) {
             String ssid(argv[1]);
-            String password(argv[2]);
+            String password(argc >= 3 ? argv[2] : "");
             if (connectWifi(ssid, password)) {
                 sendMessage(sender, WiFi.SSID().c_str());
                 sendMessage(sender, WiFi.localIP().toString().c_str());

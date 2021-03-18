@@ -3,5 +3,6 @@
     "password": "",
     "mode": 0,
     "brightness": 120,
+    "temperature": 6600,
     "refreshRate": 60
 }

@@ -32,7 +32,6 @@
 #define NAME "RGBLight"
 #endif
 
-ADC_MODE(ADC_VCC);
 // LED_BUILTIN GPIO2/TXD D4 // Cannot use Serial and the blue LED at the same time
 #define POWER_LED_PIN 5 // GPIO5 D1
 #define COLOR_LED_PIN 4 // GPIO4 D2
@@ -45,6 +44,7 @@ ADC_MODE(ADC_VCC);
 #define SERIAL_BUFFER 128
 #define WIFI_TIMEOUT 10 * 1000
 #define HOST_NAME F("rgblight")
+#define SSDP_XML "description.xml"
 
 enum LightType {
     CONSTANT,  // 常亮
@@ -285,28 +285,29 @@ void webSocketHandler(uint8_t num, WStype_t type, uint8_t *payload, size_t lengt
             }
             break;
         }
+        default: break;
     }
 }
 
 void sysinfo() {
     Serial.println("----- System information -----");
-    Serial.printf("Supply voltage: %d", ESP.getVcc());
+    Serial.printf("Supply voltage: %.3fV\r\n", ESP.getVcc() / 1000.0);
     Serial.printf("Reset reason: %s\r\n", ESP.getResetReason().c_str());
-    Serial.printf("Chip ID: %d\r\n", ESP.getChipId());
+    Serial.printf("Chip ID: %u\r\n", ESP.getChipId());
     Serial.printf("Core version: %s\r\n", ESP.getCoreVersion().c_str());
     Serial.printf("SDK version: %s\r\n", ESP.getSdkVersion());
     Serial.printf("CPU Freq: %dMHz\r\n", ESP.getCpuFreqMHz());
-    Serial.printf("Free heap: %d\r\n", ESP.getFreeHeap());
-    Serial.printf("Heap fragment percent: %d\r\n", ESP.getHeapFragmentation());
+    Serial.printf("Free heap: %u\r\n", ESP.getFreeHeap());
+    Serial.printf("Heap fragment percent: %d%%\r\n", ESP.getHeapFragmentation());
     Serial.printf("Max free block size: %d\r\n", ESP.getMaxFreeBlockSize());
-    Serial.printf("Sketch size: %d\r\n", ESP.getSketchSize());
-    Serial.printf("Sketch free space: %d\r\n", ESP.getFreeSketchSpace());
+    Serial.printf("Sketch size: %u\r\n", ESP.getSketchSize());
+    Serial.printf("Sketch free space: %u\r\n", ESP.getFreeSketchSpace());
     Serial.printf("Sketch MD5: %s\r\n", ESP.getSketchMD5().c_str());
-    Serial.printf("Flash chip ID: %d\r\n", ESP.getFlashChipId());
-    Serial.printf("Flash chip size: %d\r\n", ESP.getFlashChipSize());
-    Serial.printf("Flash chip real size: %d\r\n", ESP.getFlashChipRealSize());
-    Serial.printf("Flash chip speed: %d\r\n", ESP.getFlashChipSpeed());
-    Serial.printf("Cycle count: %d\r\n", ESP.getCycleCount());
+    Serial.printf("Flash chip ID: %u\r\n", ESP.getFlashChipId());
+    Serial.printf("Flash chip size: %u\r\n", ESP.getFlashChipSize());
+    Serial.printf("Flash chip real size: %u\r\n", ESP.getFlashChipRealSize());
+    Serial.printf("Flash chip speed: %u\r\n", ESP.getFlashChipSpeed());
+    Serial.printf("Cycle count: %u\r\n", ESP.getCycleCount());
 }
 
 String scanWifi() {
@@ -425,10 +426,14 @@ void showWifiInfo() {
 }
 
 void setMode(LightType mode) {
-    // FIXME error: variable or field 'setMode' declared void
-    // 'LightType' was not declared in this scope
     config.mode = mode;
     markDirty();
+    // @Deprecated 将会移除
+    CRGB *currentColor = getColorPointer();
+    if (currentColor) {
+        *currentColor = light.leds[0];
+        markLightDirty();
+    }
 }
 
 void setBrightness(uint8_t brightness) {
@@ -475,7 +480,7 @@ void initLight() {
     } else {
         CRGB *currentColor = getColorPointer();
         if (currentColor) {
-            *currentColor = CRGB(str2hex(str.c_str()));
+            *currentColor = CRGB((uint32_t) strtol(str.c_str(), NULL, 10));
         }
     }
     file.close();
@@ -518,12 +523,32 @@ void updateLight() {
     FastLED.show();
 }
 
+ADC_MODE(ADC_VCC);
 void preinit() {
     ESP8266WiFiClass::preinitWiFiOff();
+}
 
+void registerCommands() {
+    commandHandler.setDefaultHandler([](const Sender &sender, int argc, char *argv[]) {
+        sender.send("Unknown command. type 'help' for helps.");
+    });
+    commandHandler.registerCommand("help", "Show command helps", [](const Sender &sender, int argc, char *argv[]) {
+        commandHandler.printHelp(sender);
+    });
+    commandHandler.registerCommand("restart", "Restart system", [](const Sender &sender, int argc, char *argv[]) {
+        ESP.restart();
+    });
     commandHandler.registerCommand("sysinfo", "Show system infomation", [](const Sender &sender, int argc, char *argv[]) {
         sender.send("请在串口查看!");
         sysinfo();
+    });
+    commandHandler.registerCommand("name", "Get/set device name", [](const Sender &sender, int argc, char *argv[]) {
+        if (argc >= 1) {
+            config.name = argv[0];
+            markDirty();
+        } else {
+            sender.send(config.name.c_str());
+        }
     });
     commandHandler.registerCommand("scan", "Scan wifi", [](const Sender &sender, int argc, char *argv[]) {
         String result = scanWifi();
@@ -537,6 +562,7 @@ void preinit() {
                 sender.send(WiFi.SSID().c_str());
                 sender.send(WiFi.localIP().toString().c_str());
                 WiFi.mode(WIFI_STA);
+                SSDP.begin();
                 config.ssid = ssid;
                 config.password = password;
                 markDirty();
@@ -605,10 +631,9 @@ void preinit() {
                 sender.send("Invaild temperature");
             }
         } else {
-            char str[8];
-            str[0] = 'K';
-            itoa(config.temperature, str + 1, 10);
-            sender.send(str);
+            String str(config.temperature);
+            str += 'K';
+            sender.send(str.c_str());
         }
     });
     // @Deprecated 将被移除, 未来将改为使用mode设置颜色等参数
@@ -632,6 +657,8 @@ void preinit() {
 }
 
 void setup() {
+    registerCommands();
+
     pinMode(POWER_LED_PIN, OUTPUT);
     digitalWrite(POWER_LED_PIN, HIGH);
     FastLED.addLeds<LED_TYPE, COLOR_LED_PIN, LED_COLOR_ORDER>(light.leds, LED_COUNT);
@@ -672,6 +699,9 @@ void setup() {
     }
 
     Serial.println(F("Start HTTP server."));
+    webServer.on("/" SSDP_XML, HTTP_GET, []() {
+        SSDP.schema(webServer.client());
+    });
     webServer.serveStatic("/", LittleFS, "/www/", "max-age=300");
     webServer.begin();
     Serial.println(F("Start WebSocket server."));
@@ -684,6 +714,8 @@ void setup() {
         Serial.println(F("MDNS responder started."));
     }
     Serial.println(F("Start SSDP."));
+    SSDP.setDeviceType("upnp:rootdevice");
+    SSDP.setSchemaURL(SSDP_XML);
     SSDP.setName(config.name);
     SSDP.setSerialNumber(ID);
     SSDP.setModelName(MODEL);
@@ -692,9 +724,7 @@ void setup() {
     SSDP.setManufacturer("Wu Chen");
     SSDP.setManufacturerURL("https://github.com/DawningW");
     SSDP.setURL("index.html");
-    // SSDP.setHTTPPort(80);
     if (SSDP.begin()) {
-        SSDP.schema(Serial);
         Serial.println(F("SSDP started."));
     }
 }
@@ -704,13 +734,12 @@ void loop() {
         saveSettings();
     }
     if (light.isDirty && millis() - light.lastModifyTime > 10 * 1000) {
+        Serial.println(F("Saving light."));
         CRGB *currentColor = getColorPointer();
         if (currentColor) {
             File file = LittleFS.open("/animation.csv", "w");
             uint32_t hex = rgb2hex(currentColor->r, currentColor->g, currentColor->b);
-            char str[8];
-            hex2str(hex, str);
-            file.print(str);
+            file.print(hex);
             file.close();
         }
         light.isDirty = false;

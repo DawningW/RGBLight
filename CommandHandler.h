@@ -33,6 +33,7 @@ public:
     void setDefaultHandler(cmd_handler_t handler);
     void parseCommand(const Sender &sender, String line);
     void handleCommand(const Sender &sender, int argc, char *argv[]);
+    void printHelp(const Sender &sender);
 };
 
 #endif

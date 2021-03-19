@@ -48,3 +48,15 @@ void CommandHandler::handleCommand(const Sender &sender, int argc, char *argv[])
         defaultHandler(sender, argc, argv);
     }
 }
+
+void CommandHandler::printHelp(const Sender &sender) {
+    sender.send("----- Command helps -----");
+    Command *command = commands;
+    while (command) {
+        String str(command->cmd);
+        str += " - ";
+        str += command->description;
+        sender.send(str.c_str());
+        command = command->next;
+    }
+}

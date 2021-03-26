@@ -433,6 +433,7 @@ void setMode(LightType mode) {
     if (currentColor) {
         *currentColor = light.leds[0];
         markLightDirty();
+        // FIXME 常亮有问题
     }
 }
 
@@ -605,6 +606,7 @@ void registerCommands() {
             }
         } else {
             String str(config.mode);
+            str = "mode " + str;
             sender.send(str.c_str());
         }
     });
@@ -619,7 +621,9 @@ void registerCommands() {
         } else {
             char str[4];
             itoa(config.brightness, str, 10);
-            sender.send(str);
+            String str2(str);
+            str2 = "brightness " + str2;
+            sender.send(str2.c_str());
         }
     });
     commandHandler.registerCommand("temperature", "Get/set temperature", [](const Sender &sender, int argc, char *argv[]) {
@@ -632,7 +636,7 @@ void registerCommands() {
             }
         } else {
             String str(config.temperature);
-            str += 'K';
+            str = "temperature " + str + 'K';
             sender.send(str.c_str());
         }
     });
@@ -651,7 +655,9 @@ void registerCommands() {
             uint32_t hex = rgb2hex(currentColor->r, currentColor->g, currentColor->b);
             char str[8];
             hex2str(hex, str);
-            sender.send(str);
+            String str2(str);
+            str2 = "color " + str2;
+            sender.send(str2.c_str());
         }
     });
 }
@@ -745,6 +751,7 @@ void loop() {
         light.isDirty = false;
     }
     readSerial();
+    // TODO WIFI断开自动重连
     MDNS.update();
     webServer.handleClient();
     wsServer.loop();

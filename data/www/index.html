@@ -116,12 +116,18 @@
                     send('temperature');
                 });
                 rws.addEventListener("message", function(msg) {
-                    if (msg.data[0] == '#')
-                        cp.setHex(msg.data);
-                    else if (!isNaN(msg.data))
-                        document.getElementById("brightness").value = parseInt(msg.data);
-                    else if (msg.data.endsWith("K"))
-                        document.getElementById("temperature").value = parseInt(msg.data.substring(0, msg.data.length - 1));
+                    data = msg.data.split(" ");
+                    if (data.length > 1) {
+                        if (data[0] == "mode") {
+                            // TODO 把模式改为可选择的
+                        } else if (data[0] == "color") {
+                            cp.setHex(data[1]);
+                        } else if (data[0] == "brightness") {
+                            document.getElementById("brightness").value = parseInt(data[1]);
+                        } else if (data[0] == "temperature") {
+                            document.getElementById("temperature").value = parseInt(data[1].substring(0, data[1].length - 1));
+                        }
+                    }
                 });
                 rws.reconnect();
             }</script></body></html>

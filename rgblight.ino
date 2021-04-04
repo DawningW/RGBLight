@@ -532,7 +532,7 @@ void setBreath(uint32_t color = DEFAULT_COLOR, float lastTime = 1.0, float inter
     markDirty(true);
 }
 
-void setChase(uint32_t color = DEFAULT_COLOR, float lastTime = 1.0) {
+void setChase(uint32_t color = DEFAULT_COLOR, float lastTime = 0.5) {
     light.chase.currentColor = CRGB(color);
     light.chase.lastTime = lastTime ? lastTime : 1.0;
     markDirty(true);
@@ -558,6 +558,7 @@ void setMusic(uint8_t type = 1) {
 void setBrightness(uint8_t brightness) {
     if (config.brightness != brightness) {
         FastLED.setBrightness(brightness);
+        FastLED.show();
         config.brightness = brightness;
         markDirty();
     }
@@ -566,6 +567,7 @@ void setBrightness(uint8_t brightness) {
 void setTemperature(uint32_t temperature) {
     if (config.temperature != temperature) {
         FastLED.setTemperature(CRGB(kelvin2rgb(temperature)));
+        FastLED.show();
         config.temperature = temperature;
         markDirty();
     }

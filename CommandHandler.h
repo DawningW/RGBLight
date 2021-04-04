@@ -12,6 +12,7 @@ typedef void (*cmd_handler_t)(const Sender &sender, int argc, char *argv[]);
 
 // TODO 用字典树实现
 // https://github.com/xaxys/Oasis/blob/master/commandmanager.go
+// TODO 命令别名
 
 struct Command {
     const char *cmd;

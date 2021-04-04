@@ -25,95 +25,109 @@
 // #define FOR_MY_SISTER
 #define ID "001234567890"
 #define MODEL "WC-5"
-#define VERSION "V0.4"
+#define VERSION "V0.5"
 #ifdef FOR_MY_SISTER
 #define NAME "姐姐妹妹的小彩灯~"
 #else
 #define NAME "RGBLight"
 #endif
+#define HOST_NAME "rgblight"
 
 // LED_BUILTIN GPIO2/TXD D4 // Cannot use Serial and the blue LED at the same time
 #define POWER_LED_PIN 5 // GPIO5 D1
 #define COLOR_LED_PIN 4 // GPIO4 D2
 #define LED_TYPE WS2812B
 #define LED_COLOR_ORDER GRB
-#define LED_COUNT 30
+#define LED_COUNT 30 // TODO 支持LED方阵
 // #define LED_CORRECTION 0xFFFFFF
+#define DEFAULT_COLOR 0xFFFFFF
 
 #define CONFIG_SAVE_PERIOD 30 * 1000
 #define SERIAL_BUFFER 128
 #define WIFI_TIMEOUT 10 * 1000
-#define HOST_NAME F("rgblight")
 #define SSDP_XML "description.xml"
 
 enum LightType {
-    CONSTANT,  // 常亮
-    BLINK,     // 闪烁
-    BREATHE,   // 呼吸
-    CHASE,     // 跑马灯
-    RAINBOW,   // 彩虹
-    STREAM,    // 流光
-    ANIMATION, // 动画
-    CUSTOM     // 外部设备控制
+    CONSTANT,    // 常亮
+    BLINK,       // 闪烁
+    BREATH,      // 呼吸
+    CHASE,       // 跑马灯
+    RAINBOW,     // 彩虹
+    STREAM,      // 流光
+    ANIMATION,   // 动画
+    MUSIC,       // 音乐律动
+    CUSTOM,      // 外部设备控制
+    LIGHTS_COUNT
 };
-
-char serialBuffer[SERIAL_BUFFER + 1];
-uint8_t serialBufPos = 0;
-CommandHandler commandHandler;
-ESP8266WebServer webServer(80);
-WebSocketsServer wsServer(81);
+const char* LIGHT_TYPE_MAP[] = {"constant", "blink", "breath", "chase", "rainbow", "stream", "animation", "music", "custom"};
 
 struct Config {
     bool isDirty;
+    bool isLightDirty;
     time_t lastModifyTime;
 
     String name;
     String ssid;
     String password;
+    String hostname;
+    IPAddress ip;
+    IPAddress gateway;
+    IPAddress netmask;
     LightType mode;
     uint8_t brightness;
     uint32_t temperature;
     uint8_t refreshRate;
 } config;
 
-struct {
-    bool isDirty;
-    time_t lastModifyTime;
-
-    Ticker timer;
-    CRGB leds[LED_COUNT];
-    uint16_t currentFrame = 0;
-    union {
-        struct {
-            CRGB currentColor;
-        } constant;
-        struct {
-            CRGB currentColor;
-            float interval;
-        } blink;
-        struct {
-            CRGB currentColor;
-            float interval;
-        } breathe;
-        struct {
-            CRGB currentColor;
-            bool reversed;
-        } chase;
-        struct {
-            uint8_t currentHue;
-        } rainbow;
-        struct {
-            uint8_t currentHue;
-        } stream;
-        struct {
-            uint32_t (*animation)[LED_COUNT];
-            uint16_t frames;
-        } animation;
-        struct {
-            Sender *sender;
-        } custom;
-    };
+union {
+    struct {
+        CRGB currentColor;
+    } constant;
+    struct {
+        CRGB currentColor;
+        float lastTime;
+        float interval;
+    } blink;
+    struct {
+        CRGB currentColor;
+        float lastTime;
+        float interval;
+    } breath;
+    struct {
+        CRGB currentColor;
+        float lastTime;
+    } chase;
+    struct {
+        uint8_t currentHue;
+        int8_t delta;
+    } rainbow;
+    struct {
+        uint8_t currentHue;
+        int8_t delta;
+    } stream;
+    struct {
+        uint32_t (*anim)[LED_COUNT];
+        uint16_t frames;
+    } animation;
+    struct {
+        bool type; // 0-电平模式 1-频谱模式
+        uint8_t currentHue;
+        double currentVolume; // Must be 0~1
+    } music;
+    struct {
+        Sender *sender;
+        uint8_t index;
+    } custom;
 } light;
+
+Ticker timer;
+CRGB leds[LED_COUNT];
+uint16_t currentFrame = 0;
+char serialBuffer[SERIAL_BUFFER + 1];
+uint8_t serialBufPos = 0;
+CommandHandler commandHandler;
+ESP8266WebServer webServer(80);
+WebSocketsServer wsServer(81);
 
 class SerialSender: public Sender {
 public:
@@ -132,6 +146,18 @@ public:
     }
 };
 
+/* Get light mode enum from string */
+inline LightType str2mode(const char *str) {
+    String str2(str);
+    str2.toLowerCase();
+    for (int i = 0; i < LIGHTS_COUNT; ++i) {
+        if (strcmp(str2.c_str(), LIGHT_TYPE_MAP[i]) == 0) {
+            return (LightType) i;
+        }
+    }
+    return LIGHTS_COUNT;
+}
+
 /* Convert RGB(R, G, B) to hex(0xRRGGBB) */
 inline uint32_t rgb2hex(uint8_t r, uint8_t g, uint8_t b) {   
     return ((r & 0xff) << 16) + ((g & 0xff) << 8) + (b & 0xff);
@@ -139,6 +165,7 @@ inline uint32_t rgb2hex(uint8_t r, uint8_t g, uint8_t b) {
 
 /* Convert RGB string(#RRGGBB) to hex(0xRRGGBB) */
 inline uint32_t str2hex(const char *str) {
+    if (str[0] != '#') return DEFAULT_COLOR;
     return (uint32_t) strtol(str + 1, NULL, 16);
 }
 
@@ -148,7 +175,7 @@ inline void hex2str(uint32_t hex, char *str) {
 }
 
 /*
- * Convert Kelvin to hex(0xRRGGBB)
+ * Convert Kelvin(K) to hex(0xRRGGBB)
  * From http://www.tannerhelland.com/4435/convert-temperature-rgb-algorithm-code/
  */
 uint32_t kelvin2rgb(uint32_t t) {
@@ -188,7 +215,7 @@ uint32_t kelvin2rgb(uint32_t t) {
 void readSettings() {
     Serial.println(F("Reading settings."));
     File file = LittleFS.open("/config.json", "r");
-    StaticJsonDocument<400> doc;
+    StaticJsonDocument<600> doc;
     DeserializationError error = deserializeJson(doc, file);
     if (error) {
         Serial.println(F("Can't read settings."));
@@ -200,6 +227,13 @@ void readSettings() {
     config.name = doc["name"] | NAME;
     config.ssid = doc["ssid"] | "";
     config.password = doc["password"] | "";
+    config.hostname = doc["hostname"] | HOST_NAME;
+    String ip = doc["ip"];
+    String gateway = doc["gateway"];
+    String netmask = doc["netmask"];
+    config.ip.fromString(ip);
+    config.gateway.fromString(gateway);
+    config.netmask.fromString(netmask);
     config.mode = doc["mode"] | CONSTANT;
     config.brightness = doc["brightness"] | 150;
     config.temperature = doc["temperature"] | 6600;
@@ -210,10 +244,14 @@ void readSettings() {
 void saveSettings() {
     Serial.println(F("Saving settings."));
     File file = LittleFS.open("/config.json", "w");
-    StaticJsonDocument<400> doc;
+    StaticJsonDocument<600> doc;
     doc["name"] = config.name;
     doc["ssid"] = config.ssid;
     doc["password"] = config.password;
+    doc["hostname"] = config.hostname;
+    doc["ip"] = config.ip ? config.ip.toString() : "";
+    doc["gateway"] = config.gateway ? config.gateway.toString() : "";
+    doc["netmask"] = config.netmask ? config.netmask.toString() : "";
     doc["mode"] = config.mode;
     doc["brightness"] = config.brightness;
     doc["temperature"] = config.temperature;
@@ -225,13 +263,63 @@ void saveSettings() {
     config.isDirty = false;
 }
 
-void markDirty() {
-    config.lastModifyTime = millis();
-    config.isDirty = true;
+void loadAnimation(String &str) {
+    // 从字符串读取动画
 }
 
-void loadAnimation(String &str) {
-    // TODO 从文件读取动画
+void saveAnimation(String &str) {
+    File file = LittleFS.open("/animation.csv", "w");
+    file.print(str);
+    file.close();
+}
+
+void readLights() {
+    Serial.println(F("Reading light."));
+    if (config.mode == ANIMATION) {
+        File file = LittleFS.open("/animation.csv", "r");
+        String str = file.readString();
+        loadAnimation(str);
+        file.close();
+    } else if (config.mode != CUSTOM) {
+        File file = LittleFS.open("/light.bin", "r");
+        file.read((uint8_t*) &light, sizeof(light));
+        file.close();
+    }
+}
+
+void saveLights() {
+    Serial.println(F("Saving light."));
+    if (config.mode == ANIMATION) {
+        // We don't save animation there
+    } else if (config.mode != CUSTOM) {
+        File file = LittleFS.open("/light.bin", "w");
+        file.write((const uint8_t*) &light, sizeof(light));
+        file.close();
+    }
+    config.isLightDirty = false;
+}
+
+void markDirty(bool isLight = false) {
+    config.lastModifyTime = millis();
+    if (isLight) config.isLightDirty = true;
+    else config.isDirty = true;
+}
+
+void handleCommand(const Sender &sender, char *line) {
+    if (config.mode == MUSIC) {
+        if (tolower(line[0]) != 'm') {
+            light.music.currentVolume = atof(line);
+            return;
+        }
+    } else if (config.mode == CUSTOM) {
+        if (tolower(line[0]) != 'm') {
+            uint32_t color = str2hex(line);
+            leds[light.custom.index++] = CRGB(color);
+            if (light.custom.index >= LED_COUNT) light.custom.index = 0;
+            return;
+        }
+    }
+    commandHandler.parseCommand(sender, line);
 }
 
 void clearBuffer(bool clearAll = false) {
@@ -251,7 +339,7 @@ void readSerial() {
             if (serialBufPos > 0) {
                 Serial.printf("Received data from com: %s.", serialBuffer);
                 Serial.println();
-                commandHandler.parseCommand(ss, serialBuffer);
+                handleCommand(ss, serialBuffer);
             }
             clearBuffer();
         } else if (serialBufPos < SERIAL_BUFFER && isprint(c)) {
@@ -265,7 +353,7 @@ void webSocketHandler(uint8_t num, WStype_t type, uint8_t *payload, size_t lengt
         case WStype_CONNECTED: {
             // payload is "/"
             IPAddress ip = wsServer.remoteIP(num);
-            Serial.printf("Client %u connected from %d.%d.%d.%d.", num, ip[0], ip[1], ip[2], ip[3]);
+            Serial.printf("Client %u connected from %s.", num, ip.toString().c_str());
             Serial.println();
             wsServer.sendTXT(num, "Connect successfully!");
             break;
@@ -276,12 +364,12 @@ void webSocketHandler(uint8_t num, WStype_t type, uint8_t *payload, size_t lengt
             break;
         }
         case WStype_TEXT: {
-            String message(reinterpret_cast<char*>(payload));
-            if (!message.isEmpty()) {
-                Serial.printf("Received message from %u: %s.", num, message.c_str());
+            char *str = reinterpret_cast<char*>(payload);
+            if (length > 0) {
+                Serial.printf("Received message from %u: %s.", num, str);
                 Serial.println();
                 WebSocketSender ws(num);
-                commandHandler.parseCommand(ws, message);
+                handleCommand(ws, str);
             }
             break;
         }
@@ -337,12 +425,14 @@ String scanWifi() {
     return jsonStr;
 }
 
-// TODO 静态IP地址
 bool connectWifi(String &ssid, String &password) {
     Serial.println(F("Connecting to wlan."));
     if (ssid.isEmpty()) {
         Serial.println(F("Wifi SSID is empty."));
         return false;
+    }
+    if (config.ip && config.gateway && config.netmask) {
+        WiFi.config(config.ip, config.gateway, config.netmask);
     }
     WiFi.begin(ssid, password);
     time_t t = millis();
@@ -355,7 +445,7 @@ bool connectWifi(String &ssid, String &password) {
             return false;
         }
     }
-    WiFi.hostname(HOST_NAME);
+    WiFi.hostname(config.hostname);
     Serial.println();
     Serial.println(F("Connect to wlan successfully."));
     return true;
@@ -369,32 +459,22 @@ bool openHotspot() {
     return result;
 }
 
-static const char* getWifiStatus(wl_status_t status) {
-    switch (status) {
-        case WL_IDLE_STATUS:
-            return "Idle";
-        case WL_NO_SSID_AVAIL:
-            return "No SSID";
-        case WL_SCAN_COMPLETED:
-            return "Scan Done";
-        case WL_CONNECTED:
-            return "Connected";
-        case WL_CONNECT_FAILED:
-            return "Failed";
-        case WL_CONNECTION_LOST:
-            return "Lost";
-        case WL_DISCONNECTED:
-            return "Disconnected";
-        default:
-            return "Other";
-    }
-}
-
 void showWifiInfo() {
     Serial.printf("Current mode: %d\r\n", WiFi.getMode());
     Serial.println("----- STA Info -----");
     Serial.printf("Connected: %s\r\n", WiFi.isConnected() ? "true" : "false");
-    Serial.printf("Connection status: %s\r\n", getWifiStatus(WiFi.status()));
+    const char *wifi_status;
+    switch (WiFi.status()) {
+        case WL_IDLE_STATUS: wifi_status = "Idle";
+        case WL_NO_SSID_AVAIL: wifi_status = "No SSID";
+        case WL_SCAN_COMPLETED: wifi_status = "Scan Done";
+        case WL_CONNECTED: wifi_status = "Connected";
+        case WL_CONNECT_FAILED: wifi_status = "Failed";
+        case WL_CONNECTION_LOST: wifi_status = "Lost";
+        case WL_DISCONNECTED: wifi_status = "Disconnected";
+        default: wifi_status = "Other";
+    }
+    Serial.printf("Connection status: %s\r\n", wifi_status);
     Serial.printf("Auto connect: %s\r\n", WiFi.getAutoConnect() ? "true" : "false");
     Serial.printf("MAC address: %s\r\n", WiFi.macAddress().c_str());
     Serial.printf("Hostname: %s\r\n", WiFi.hostname().c_str());
@@ -426,102 +506,161 @@ void showWifiInfo() {
 }
 
 void setMode(LightType mode) {
-    config.mode = mode;
-    markDirty();
-    // @Deprecated 将会移除
-    CRGB *currentColor = getColorPointer();
-    if (currentColor) {
-        *currentColor = light.leds[0];
-        markLightDirty();
-        // FIXME 常亮有问题
+    currentFrame = 0;
+    if (config.mode != mode) {
+        config.mode = mode;
+        markDirty();
     }
+}
+
+void setConstant(uint32_t color = DEFAULT_COLOR) {
+    light.constant.currentColor = CRGB(color);
+    markDirty(true);
+}
+
+void setBlink(uint32_t color = DEFAULT_COLOR, float lastTime = 1.0, float interval = 1.0) {
+    light.blink.currentColor = CRGB(color);
+    light.blink.lastTime = lastTime > 0 ? lastTime : 1.0;
+    light.blink.interval = interval >= 0 ? interval : 1.0;
+    markDirty(true);
+}
+
+void setBreath(uint32_t color = DEFAULT_COLOR, float lastTime = 1.0, float interval = 0.5) {
+    light.breath.currentColor = CRGB(color);
+    light.breath.lastTime = lastTime > 0 ? lastTime : 1.0;
+    light.breath.interval = interval >= 0 ? interval : 0.5;
+    markDirty(true);
+}
+
+void setChase(uint32_t color = DEFAULT_COLOR, float lastTime = 1.0) {
+    light.chase.currentColor = CRGB(color);
+    light.chase.lastTime = lastTime ? lastTime : 1.0;
+    markDirty(true);
+}
+
+void setRainbow(int8_t delta = 1) {
+    light.rainbow.delta = delta != 0 ? delta : 1;
+    markDirty(true);
+}
+
+void setStream(int8_t delta = 1) {
+    light.stream.delta = delta != 0 ? delta : 1;
+    markDirty(true);
+}
+
+void setMusic(uint8_t type = 1) {
+    light.music.type = type;
+    light.music.currentHue = 0;
+    light.music.currentVolume = 0.0;
+    markDirty(true);
 }
 
 void setBrightness(uint8_t brightness) {
-    FastLED.setBrightness(brightness);
-    config.brightness = brightness;
-    markDirty();
+    if (config.brightness != brightness) {
+        FastLED.setBrightness(brightness);
+        config.brightness = brightness;
+        markDirty();
+    }
 }
 
 void setTemperature(uint32_t temperature) {
-    FastLED.setTemperature(CRGB(kelvin2rgb(temperature)));
-    config.temperature = temperature;
-    markDirty();
+    if (config.temperature != temperature) {
+        FastLED.setTemperature(CRGB(kelvin2rgb(temperature)));
+        config.temperature = temperature;
+        markDirty();
+    }
 }
 
 void setRefreshRate(uint8_t rate) {
-    light.currentFrame = 0;
-    if (light.timer.active()) light.timer.detach();
-    light.timer.attach_ms(1000 / rate, updateLight);
-    config.refreshRate = rate;
-    markDirty();
-}
-
-// @Deprecated 垃圾代码, 将会移除于改用mode命令设置灯的颜色后
-CRGB* getColorPointer() {
-    switch (config.mode) {
-        case CONSTANT: return &light.constant.currentColor;
-        case BLINK: return &light.blink.currentColor;
-        case BREATHE: return &light.breathe.currentColor;
-        case CHASE: return &light.chase.currentColor;
+    if (config.refreshRate != rate) {
+        currentFrame = 0;
+        if (timer.active()) timer.detach();
+        timer.attach_ms(1000 / rate, updateLight);
+        config.refreshRate = rate;
+        markDirty();
     }
-    return nullptr;
-}
-// @Deprecated 我还在想灯模式怎么存储
-void markLightDirty() {
-    light.lastModifyTime = millis();
-    light.isDirty = true;
-}
-
-void initLight() {
-    File file = LittleFS.open("/animation.csv", "r");
-    String str = file.readString();
-    if (config.mode == ANIMATION) {
-        loadAnimation(str);
-    } else {
-        CRGB *currentColor = getColorPointer();
-        if (currentColor) {
-            *currentColor = CRGB((uint32_t) strtol(str.c_str(), NULL, 10));
-        }
-    }
-    file.close();
 }
 
 void updateLight() {
-    if (++light.currentFrame >= config.refreshRate) light.currentFrame = 0;
     if (config.mode == CONSTANT) {
-        if (light.leds[0] != light.constant.currentColor) {
-            fill_solid(light.leds, LED_COUNT, light.constant.currentColor);
+        if (leds[0] != light.constant.currentColor) {
+            fill_solid(leds, LED_COUNT, light.constant.currentColor);
+            FastLED.show();
         }
     } else if (config.mode == BLINK) {
-        if (light.currentFrame == 0) {
-            fill_solid(light.leds, LED_COUNT, light.blink.currentColor);
-        } else if (light.currentFrame == config.refreshRate / 2) {
-            fill_solid(light.leds, LED_COUNT, CRGB::Black);
+        int lastTime = config.refreshRate * light.blink.lastTime;
+        int interval = config.refreshRate * light.blink.interval;
+        if (currentFrame == 0) {
+            fill_solid(leds, LED_COUNT, light.blink.currentColor);
+            FastLED.show();
+        } else if (currentFrame == lastTime) {
+            fill_solid(leds, LED_COUNT, CRGB::Black);
+            FastLED.show();
         }
-    } else if (config.mode == BREATHE) {
-        CRGB rgb = light.breathe.currentColor;
-        int temp = 255 - 510 * light.currentFrame / config.refreshRate;
-        rgb.nscale8(abs(temp));
-        fill_solid(light.leds, LED_COUNT, rgb);
+        if (++currentFrame >= lastTime + interval) currentFrame = 0;
+    } else if (config.mode == BREATH) {
+        int lastTime = config.refreshRate * light.breath.lastTime;
+        int interval = config.refreshRate * light.breath.interval;
+        if (currentFrame <= lastTime) {
+            CRGB rgb = light.breath.currentColor;
+            double x = (double) currentFrame / lastTime;
+            int scale = -1010 * x * x + 1010 * x;
+            rgb.nscale8(scale);
+            fill_solid(leds, LED_COUNT, rgb);
+            FastLED.show();
+        }
+        if (++currentFrame >= lastTime + interval) currentFrame = 0;
     } else if (config.mode == CHASE) {
-        fill_solid(light.leds, LED_COUNT, CRGB::Black);
-        int led = LED_COUNT * light.currentFrame / config.refreshRate;
-        if (light.chase.reversed) led = LED_COUNT - 1 - led;
-        light.leds[led] = light.chase.currentColor;
-        if (light.currentFrame == config.refreshRate - 1)
-            light.chase.reversed = !light.chase.reversed;
+        int lastTime = config.refreshRate * light.chase.lastTime;
+        if (currentFrame % lastTime == 0) {
+            fill_solid(leds, LED_COUNT, CRGB::Black);
+            int index = currentFrame / lastTime;
+            if (index > LED_COUNT * 2 - 1) {
+                currentFrame = 0;
+                index = 0;
+            } else if (index > LED_COUNT - 1) {
+                index = 59 - index;
+            }
+            leds[index] = light.chase.currentColor;
+            FastLED.show();
+        }
+        ++currentFrame;
     } else if (config.mode == RAINBOW) {
-        CHSV hsv(light.rainbow.currentHue++, 255, 240);
+        CHSV hsv(light.rainbow.currentHue, 255, 240);
         CRGB rgb;
         hsv2rgb_rainbow(hsv, rgb);
-        fill_solid(light.leds, LED_COUNT, rgb);
+        fill_solid(leds, LED_COUNT, rgb);
+        FastLED.show();
+        light.rainbow.currentHue += light.rainbow.delta;
     } else if (config.mode == STREAM) {
-        fill_rainbow(light.leds, LED_COUNT, light.stream.currentHue++);
+        fill_rainbow(leds, LED_COUNT, light.stream.currentHue);
+        FastLED.show();
+        light.stream.currentHue += light.stream.delta;
     } else if (config.mode == ANIMATION) {
-        // TODO 播放动画
+        // 播放动画
+    } else if (config.mode == MUSIC) {
+        if (light.music.type) {
+            // TODO 音乐律动可以优化一下
+            // 分奇偶讨论???
+            int count = LED_COUNT * light.music.currentVolume;
+            CHSV hsv(light.music.currentHue++, 255, 240);
+            CRGB rgb;
+            hsv2rgb_rainbow(hsv, rgb);
+            fill_solid(leds, LED_COUNT, CRGB::Black);
+            fill_solid(leds + (LED_COUNT - count) / 2, count, rgb);
+            FastLED.show();
+        } else {
+            int count = LED_COUNT * light.music.currentVolume;
+            fill_solid(leds, LED_COUNT, CRGB::Black);
+            if (count > 0) {
+                fill_solid(leds, count - 1, CRGB::Green);
+                leds[count - 1] = CRGB::Red;
+            }
+            FastLED.show();
+        }
+    } else if (config.mode == CUSTOM) {
+        FastLED.show();
     }
-    FastLED.show();
 }
 
 ADC_MODE(ADC_VCC);
@@ -529,6 +668,8 @@ void preinit() {
     ESP8266WiFiClass::preinitWiFiOff();
 }
 
+// TODO 改造命令返回值
+// TODO 加入info命令
 void registerCommands() {
     commandHandler.setDefaultHandler([](const Sender &sender, int argc, char *argv[]) {
         sender.send("Unknown command. type 'help' for helps.");
@@ -546,9 +687,13 @@ void registerCommands() {
     commandHandler.registerCommand("name", "Get/set device name", [](const Sender &sender, int argc, char *argv[]) {
         if (argc >= 1) {
             config.name = argv[0];
+            if (argc >= 2) {
+                config.hostname = argv[1];
+            }
             markDirty();
         } else {
-            sender.send(config.name.c_str());
+            String str = String("name ") + config.name + ' ' + config.hostname;
+            sender.send(str.c_str());
         }
     });
     commandHandler.registerCommand("scan", "Scan wifi", [](const Sender &sender, int argc, char *argv[]) {
@@ -559,6 +704,11 @@ void registerCommands() {
         if (argc >= 1) {
             String ssid(argv[0]);
             String password(argc >= 2 ? argv[1] : "");
+            if (argc >= 5) {
+                config.ip.fromString(argv[2]);
+                config.gateway.fromString(argv[3]);
+                config.netmask.fromString(argv[4]);
+            }
             if (connectWifi(ssid, password)) {
                 sender.send(WiFi.SSID().c_str());
                 sender.send(WiFi.localIP().toString().c_str());
@@ -568,6 +718,9 @@ void registerCommands() {
                 config.password = password;
                 markDirty();
             } else {
+                config.ip = IPAddress();
+                config.gateway = IPAddress();
+                config.netmask = IPAddress();
                 sender.send("连接失败!");
             }
         }
@@ -579,6 +732,9 @@ void registerCommands() {
         WiFi.mode(WIFI_AP);
         config.ssid = "";
         config.password = "";
+        config.ip = IPAddress();
+        config.gateway = IPAddress();
+        config.netmask = IPAddress();
         markDirty();
     });
     commandHandler.registerCommand("netinfo", "Show wifi infomation", [](const Sender &sender, int argc, char *argv[]) {
@@ -587,26 +743,121 @@ void registerCommands() {
     });
     commandHandler.registerCommand("mode", "Get/set light mode", [](const Sender &sender, int argc, char *argv[]) {
         if (argc >= 1) {
-            if (strcmp(argv[0], "constant") == 0) {
-                setMode(CONSTANT);
-            } else if (strcmp(argv[0], "blink") == 0) {
-                setMode(BLINK);
-            } else if (strcmp(argv[0], "breathe") == 0) {
-                setMode(BREATHE);
-            } else if (strcmp(argv[0], "chase") == 0) {
-                setMode(CHASE);
-            } else if (strcmp(argv[0], "rainbow") == 0) {
-                setMode(RAINBOW);
-            } else if (strcmp(argv[0], "stream") == 0) {
-                setMode(STREAM);
-            } else if (strcmp(argv[0], "animation") == 0) {
-                setMode(ANIMATION);
-            } else if (strcmp(argv[0], "custom") == 0) {
-                setMode(CUSTOM);
+            LightType mode = str2mode(argv[0]);
+            setMode(mode);
+            switch (mode) {
+                case CONSTANT: {
+                    if (argc >= 2) {
+                        uint32_t color = str2hex(argv[1]);
+                        setConstant(color);
+                        break;
+                    }
+                    setConstant();
+                    break;
+                }
+                case BLINK: {
+                    if (argc >= 2) {
+                        uint32_t color = str2hex(argv[1]);
+                        if (argc >= 3) {
+                            float lastTime = atof(argv[2]);
+                            if (argc >= 4) {
+                                float interval = atof(argv[3]);
+                                setBlink(color, lastTime, interval);
+                                break;
+                            }
+                            setBlink(color, lastTime);
+                            break;
+                        }
+                        setBlink(color);
+                        break;
+                    }
+                    setBlink();
+                    break;
+                }
+                case BREATH: {
+                    if (argc >= 2) {
+                        uint32_t color = str2hex(argv[1]);
+                        if (argc >= 3) {
+                            float lastTime = atof(argv[2]);
+                            if (argc >= 4) {
+                                float interval = atof(argv[3]);
+                                setBreath(color, lastTime, interval);
+                                break;
+                            }
+                            setBreath(color, lastTime);
+                            break;
+                        }
+                        setBreath(color);
+                        break;
+                    }
+                    setBreath();
+                    break;
+                }
+                case CHASE: {
+                    if (argc >= 2) {
+                        uint32_t color = str2hex(argv[1]);
+                        if (argc >= 3) {
+                            float lastTime = atof(argv[2]);
+                            setChase(color, lastTime);
+                            break;
+                        }
+                        setChase(color);
+                        break;
+                    }
+                    setChase();
+                    break;
+                }
+                case RAINBOW: {
+                    if (argc >= 2) {
+                        int8_t delta = atoi(argv[1]);
+                        setRainbow(delta);
+                        break;
+                    }
+                    setRainbow();
+                    break;
+                }
+                case STREAM: {
+                    if (argc >= 2) {
+                        int8_t delta = atoi(argv[1]);
+                        setStream(delta);
+                        break;
+                    }
+                    setStream();
+                    break;
+                }
+                case ANIMATION: {
+                    // 开始读取动画
+                    break;
+                }
+                case MUSIC: {
+                    if (argc >= 2) {
+                        int8_t type = atoi(argv[1]);
+                        setMusic(type);
+                        break;
+                    }
+                    setMusic();
+                    break;
+                }
+                case CUSTOM: {
+                    light.custom.sender = nullptr;
+                    light.custom.index = 0;
+                    break;
+                }
+                default: {
+                    sender.send("Invaild mode");
+                    break;
+                }
             }
         } else {
-            String str(config.mode);
-            str = "mode " + str;
+            String str = String("mode ") + LIGHT_TYPE_MAP[config.mode];
+            if (config.mode <= CHASE) {
+                str += ' ';
+                CRGB &currentColor = light.constant.currentColor;
+                uint32_t hex = rgb2hex(currentColor.r, currentColor.g, currentColor.b);
+                char color[8];
+                hex2str(hex, color);
+                str += color;
+            }
             sender.send(str.c_str());
         }
     });
@@ -619,11 +870,8 @@ void registerCommands() {
                 sender.send("Invaild brightness");
             }
         } else {
-            char str[4];
-            itoa(config.brightness, str, 10);
-            String str2(str);
-            str2 = "brightness " + str2;
-            sender.send(str2.c_str());
+            String str = String("brightness ") + config.brightness;
+            sender.send(str.c_str());
         }
     });
     commandHandler.registerCommand("temperature", "Get/set temperature", [](const Sender &sender, int argc, char *argv[]) {
@@ -635,29 +883,21 @@ void registerCommands() {
                 sender.send("Invaild temperature");
             }
         } else {
-            String str(config.temperature);
-            str = "temperature " + str + 'K';
+            String str = String("temperature ") + config.temperature + 'K';
             sender.send(str.c_str());
         }
     });
-    // @Deprecated 将被移除, 未来将改为使用mode设置颜色等参数
-    commandHandler.registerCommand("color", "Get/set color(Will be removed in the future)", [](const Sender &sender, int argc, char *argv[]) {
-        CRGB *currentColor = getColorPointer();
-        if (!currentColor) {
-            sender.send("该模式下无法获取/修改颜色");
-            return;
-        }
+    commandHandler.registerCommand("fps", "Get/set refresh rate", [](const Sender &sender, int argc, char *argv[]) {
         if (argc >= 1) {
-            uint32_t hex = str2hex(argv[0]);
-            *currentColor = CRGB(hex);
-            markLightDirty();
+            int rate = atoi(argv[0]);
+            if (rate > 0 && rate <= 255) {
+                setRefreshRate((uint8_t) rate);
+            } else {
+                sender.send("Invaild refresh rate");
+            }
         } else {
-            uint32_t hex = rgb2hex(currentColor->r, currentColor->g, currentColor->b);
-            char str[8];
-            hex2str(hex, str);
-            String str2(str);
-            str2 = "color " + str2;
-            sender.send(str2.c_str());
+            String str = String("fps ") + config.refreshRate;
+            sender.send(str.c_str());
         }
     });
 }
@@ -667,7 +907,7 @@ void setup() {
 
     pinMode(POWER_LED_PIN, OUTPUT);
     digitalWrite(POWER_LED_PIN, HIGH);
-    FastLED.addLeds<LED_TYPE, COLOR_LED_PIN, LED_COLOR_ORDER>(light.leds, LED_COUNT);
+    FastLED.addLeds<LED_TYPE, COLOR_LED_PIN, LED_COLOR_ORDER>(leds, LED_COUNT);
 #ifdef LED_CORRECTION
     FastLED.setCorrection(CRGB(LED_CORRECTION));
 #endif
@@ -687,11 +927,11 @@ void setup() {
     readSettings();
     if (!LittleFS.exists("/config.json"))
         saveSettings();
+    readLights();
 
-    initLight();
     FastLED.setBrightness(config.brightness);
     FastLED.setTemperature(CRGB(kelvin2rgb(config.temperature)));
-    light.timer.attach_ms(1000 / config.refreshRate, updateLight);
+    timer.attach_ms(1000 / config.refreshRate, updateLight);
 
     if (connectWifi(config.ssid, config.password)) {
         WiFi.mode(WIFI_STA);
@@ -714,7 +954,7 @@ void setup() {
     wsServer.onEvent(webSocketHandler);
     wsServer.begin();
     Serial.println(F("Start mDNS."));
-    if (MDNS.begin(HOST_NAME)) {
+    if (MDNS.begin(config.hostname)) {
         MDNS.addService("http", "tcp", 80);
         MDNS.addService("ws", "tcp", 81);
         Serial.println(F("MDNS responder started."));
@@ -739,19 +979,10 @@ void loop() {
     if (config.isDirty && millis() - config.lastModifyTime > CONFIG_SAVE_PERIOD) {
         saveSettings();
     }
-    if (light.isDirty && millis() - light.lastModifyTime > 10 * 1000) {
-        Serial.println(F("Saving light."));
-        CRGB *currentColor = getColorPointer();
-        if (currentColor) {
-            File file = LittleFS.open("/animation.csv", "w");
-            uint32_t hex = rgb2hex(currentColor->r, currentColor->g, currentColor->b);
-            file.print(hex);
-            file.close();
-        }
-        light.isDirty = false;
+    if (config.isLightDirty && millis() - config.lastModifyTime > CONFIG_SAVE_PERIOD) {
+        saveLights();
     }
     readSerial();
-    // TODO WIFI断开自动重连
     MDNS.update();
     webServer.handleClient();
     wsServer.loop();

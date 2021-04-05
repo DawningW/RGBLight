@@ -532,9 +532,9 @@ void setBreath(uint32_t color = DEFAULT_COLOR, float lastTime = 1.0, float inter
     markDirty(true);
 }
 
-void setChase(uint32_t color = DEFAULT_COLOR, float lastTime = 0.5) {
+void setChase(uint32_t color = DEFAULT_COLOR, float lastTime = 0.2) {
     light.chase.currentColor = CRGB(color);
-    light.chase.lastTime = lastTime ? lastTime : 1.0;
+    light.chase.lastTime = lastTime ? lastTime : 0.2;
     markDirty(true);
 }
 

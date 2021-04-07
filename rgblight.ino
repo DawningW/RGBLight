@@ -307,12 +307,14 @@ void markDirty(bool isLight = false) {
 
 void handleCommand(const Sender &sender, char *line) {
     if (config.mode == MUSIC) {
-        if (tolower(line[0]) != 'm') {
+        char c = tolower(line[0]);
+        if (c != 'm' && c != 'i') {
             light.music.currentVolume = atof(line);
             return;
         }
     } else if (config.mode == CUSTOM) {
-        if (tolower(line[0]) != 'm') {
+        char c = tolower(line[0]);
+        if (c != 'm' && c != 'i') {
             uint32_t color = str2hex(line);
             leds[light.custom.index++] = CRGB(color);
             if (light.custom.index >= LED_COUNT) light.custom.index = 0;
@@ -337,7 +339,9 @@ void readSerial() {
         if (c == '\r' || c == '\n') {
             serialBuffer[serialBufPos] = '\0';
             if (serialBufPos > 0) {
+#ifdef DEBUG_WC
                 Serial.printf("Received data from com: %s.", serialBuffer);
+#endif
                 Serial.println();
                 handleCommand(ss, serialBuffer);
             }
@@ -366,8 +370,10 @@ void webSocketHandler(uint8_t num, WStype_t type, uint8_t *payload, size_t lengt
         case WStype_TEXT: {
             char *str = reinterpret_cast<char*>(payload);
             if (length > 0) {
+#ifdef DEBUG_WC
                 Serial.printf("Received message from %u: %s.", num, str);
                 Serial.println();
+#endif
                 WebSocketSender ws(num);
                 handleCommand(ws, str);
             }
@@ -377,7 +383,7 @@ void webSocketHandler(uint8_t num, WStype_t type, uint8_t *payload, size_t lengt
     }
 }
 
-void sysinfo() {
+void showSystemInfo() {
     Serial.println("----- System information -----");
     Serial.printf("Supply voltage: %.3fV\r\n", ESP.getVcc() / 1000.0);
     Serial.printf("Reset reason: %s\r\n", ESP.getResetReason().c_str());
@@ -671,7 +677,6 @@ void preinit() {
 }
 
 // TODO 改造命令返回值
-// TODO 加入info命令
 void registerCommands() {
     commandHandler.setDefaultHandler([](const Sender &sender, int argc, char *argv[]) {
         sender.send("Unknown command. type 'help' for helps.");
@@ -684,7 +689,7 @@ void registerCommands() {
     });
     commandHandler.registerCommand("sysinfo", "Show system infomation", [](const Sender &sender, int argc, char *argv[]) {
         sender.send("请在串口查看!");
-        sysinfo();
+        showSystemInfo();
     });
     commandHandler.registerCommand("name", "Get/set device name", [](const Sender &sender, int argc, char *argv[]) {
         if (argc >= 1) {
@@ -703,6 +708,8 @@ void registerCommands() {
         sender.send(result.c_str());
     });
     commandHandler.registerCommand("connect", "Connect to wifi", [](const Sender &sender, int argc, char *argv[]) {
+        // FIXME 无密码怎么设置静态IP以及SSID有空格咋办
+        // FIXME wifi连接失败后不会连回去
         if (argc >= 1) {
             String ssid(argv[0]);
             String password(argc >= 2 ? argv[1] : "");
@@ -901,6 +908,27 @@ void registerCommands() {
             String str = String("fps ") + config.refreshRate;
             sender.send(str.c_str());
         }
+    });
+    commandHandler.registerCommand("info", "Show rgblight information", [](const Sender &sender, int argc, char *argv[]) {
+        StaticJsonDocument<1024> doc;
+        doc["name"] = config.name;
+        doc["id"] = ID;
+        doc["model"] = MODEL;
+        doc["version"] = VERSION;
+        doc["mode"] = LIGHT_TYPE_MAP[config.mode];
+        if (config.mode <= CHASE) {
+            CRGB &currentColor = light.constant.currentColor;
+            uint32_t hex = rgb2hex(currentColor.r, currentColor.g, currentColor.b);
+            char color[8];
+            hex2str(hex, color);
+            doc["color"] = color;
+        }
+        doc["brightness"] = config.brightness;
+        doc["temperature"] = config.temperature;
+        doc["fps"] = config.refreshRate;
+        String jsonStr;
+        serializeJson(doc, jsonStr);
+        sender.send(jsonStr.c_str());
     });
 }
 

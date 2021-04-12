@@ -368,7 +368,7 @@ void webSocketHandler(uint8_t num, WStype_t type, uint8_t *payload, size_t lengt
             break;
         }
         case WStype_TEXT: {
-            char *str = reinterpret_cast<char*>(payload);
+            char *str = static_cast<char*>(payload);
             if (length > 0) {
 #ifdef DEBUG_WC
                 Serial.printf("Received message from %u: %s.", num, str);

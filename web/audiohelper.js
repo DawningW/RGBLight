@@ -25,8 +25,8 @@ function startRecord(callback) {
     }
 
     window.navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: true
+        "video": true,
+        "audio": true
     }).then((stream) => {
         mediaStream = stream;
         audioSource = ctx.createMediaStreamSource(stream);

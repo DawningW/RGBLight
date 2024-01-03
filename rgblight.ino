@@ -1,390 +1,691 @@
-/*
- * RGBLight with ESP8266 by wc
+/**
+ * RGB Light 炫酷 RGB 灯
+ *
+ * 基于 ESP8266 使用 Arduino 开发的物联网炫酷小彩灯, 支持多种形态多种光效, 配套自研网页/小程序/PC 客户端
+ *
+ * @author QingChenW
  */
-// #define DEBUG_WC
-#ifdef DEBUG_WC
-#define _DEBUG 1
-#define DEBUG_ESP_WIFI
-#define DEBUG_ESP_PORT Serial
-#include <GDBStub.h>
-#endif
 
+#include "config.h"
+
+#include <functional>
 #include <Arduino.h>
 #include <Ticker.h>
 #include <LittleFS.h>
+#include <Updater.h>
+#include <DNSServer.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
-#include <ESP8266SSDP.h>
 #include <ESP8266WebServer.h>
+#include <WiFiUdp.h>
 #include <WebSocketsServer.h>
 #include <ArduinoJson.h>
 #define FASTLED_ESP8266_RAW_PIN_ORDER // 不需要转换
 #include <FastLED.h>
-#include "CommandHandler.h"
-
-// #define FOR_MY_SISTER
-#define ID "001234567890"
-#define MODEL "WC-5"
-#define VERSION "V0.5"
-#ifdef FOR_MY_SISTER
-#define NAME "姐姐妹妹的小彩灯~"
-#else
-#define NAME "RGBLight"
+#ifdef ENABLE_DEBUG
+#include <GDBStub.h>
 #endif
-#define HOST_NAME "rgblight"
 
-// LED_BUILTIN GPIO2/TXD D4 // Cannot use Serial and the blue LED at the same time
-#define POWER_LED_PIN 5 // GPIO5 D1
-#define COLOR_LED_PIN 4 // GPIO4 D2
-#define LED_TYPE WS2812B
-#define LED_COLOR_ORDER GRB
-#define LED_COUNT 30 // TODO 支持LED方阵
-// #define LED_CORRECTION 0xFFFFFF
-#define DEFAULT_COLOR 0xFFFFFF
+#include "CommandHandler.hpp"
+#include "Light.hpp"
+#include "LightEffect.hpp"
+#include "utils.h"
 
-#define CONFIG_SAVE_PERIOD 30 * 1000
-#define SERIAL_BUFFER 128
-#define WIFI_TIMEOUT 10 * 1000
-#define SSDP_XML "description.xml"
+#define MIME_TYPE(t) (mime::mimeTable[mime::type::t].mimeType)
 
-enum LightType {
-    CONSTANT,    // 常亮
-    BLINK,       // 闪烁
-    BREATH,      // 呼吸
-    CHASE,       // 跑马灯
-    RAINBOW,     // 彩虹
-    STREAM,      // 流光
-    ANIMATION,   // 动画
-    MUSIC,       // 音乐律动
-    CUSTOM,      // 外部设备控制
-    LIGHTS_COUNT
-};
-const char* LIGHT_TYPE_MAP[] = {"constant", "blink", "breath", "chase", "rainbow", "stream", "animation", "music", "custom"};
+typedef std::function<Effect*(int argc, const char *argv[])> CreateEffectFunc;
 
-struct Config {
-    bool isDirty;
-    bool isLightDirty;
-    time_t lastModifyTime;
+const char *product_name = "rgblight";
+const char *model_name = MODEL;
+const char *version = VERSION;
+const uint32_t version_code = VERSION_CODE;
 
-    String name;
-    String ssid;
-    String password;
-    String hostname;
-    IPAddress ip;
-    IPAddress gateway;
-    IPAddress netmask;
-    LightType mode;
-    uint8_t brightness;
-    uint32_t temperature;
-    uint8_t refreshRate;
-} config;
-
-union {
-    struct {
-        CRGB currentColor;
-    } constant;
-    struct {
-        CRGB currentColor;
-        float lastTime;
-        float interval;
-    } blink;
-    struct {
-        CRGB currentColor;
-        float lastTime;
-        float interval;
-    } breath;
-    struct {
-        CRGB currentColor;
-        float lastTime;
-    } chase;
-    struct {
-        uint8_t currentHue;
-        int8_t delta;
-    } rainbow;
-    struct {
-        uint8_t currentHue;
-        int8_t delta;
-    } stream;
-    struct {
-        uint32_t (*anim)[LED_COUNT];
-        uint16_t frames;
-    } animation;
-    struct {
-        bool type; // 0-电平模式 1-频谱模式
-        uint8_t currentHue;
-        double currentVolume; // Must be 0~1
-    } music;
-    struct {
-        Sender *sender;
-        uint8_t index;
-    } custom;
-} light;
-
+CreateEffectFunc effectFactories[EFFECT_TYPE_COUNT];
 Ticker timer;
-CRGB leds[LED_COUNT];
-uint16_t currentFrame = 0;
-char serialBuffer[SERIAL_BUFFER + 1];
-uint8_t serialBufPos = 0;
-CommandHandler commandHandler;
+LIGHT_TYPE light;
+Effect *lightEffect;
+DNSServer dnsServer;
 ESP8266WebServer webServer(80);
 WebSocketsServer wsServer(81);
 
-class SerialSender: public Sender {
-public:
-    void send(const char *msg) const override {
-        Serial.println(msg);
-    }
-} ss;
+struct Config {
+    time_t lastModifyTime;
+    bool isDirty;
 
-class WebSocketSender: public Sender {
-private:
-    int num;
-public:
-    WebSocketSender(int n): num(n) {}
-    void send(const char *msg) const override {
-        wsServer.sendTXT(num, msg, strlen(msg));
-    }
-};
+    String name;          // 设备名称
+    String ssid;          // WIFI 名称
+    String password;      // WIFI 密码
+    String hostname;      // 主机名
+    uint16_t refreshRate; // 刷新率, 默认 60Hz
+    uint8_t brightness;   // 亮度, 默认 63
+    uint32_t temperature; // 色温, 默认 6600K
+} config;
 
-/* Get light mode enum from string */
-inline LightType str2mode(const char *str) {
-    String str2(str);
-    str2.toLowerCase();
-    for (int i = 0; i < LIGHTS_COUNT; ++i) {
-        if (strcmp(str2.c_str(), LIGHT_TYPE_MAP[i]) == 0) {
-            return (LightType) i;
-        }
-    }
-    return LIGHTS_COUNT;
+// For LightEffect
+const uint16_t &fps = config.refreshRate;
+
+void markDirty() {
+    config.lastModifyTime = millis();
+    config.isDirty = true;
 }
 
-/* Convert RGB(R, G, B) to hex(0xRRGGBB) */
-inline uint32_t rgb2hex(uint8_t r, uint8_t g, uint8_t b) {   
-    return ((r & 0xff) << 16) + ((g & 0xff) << 8) + (b & 0xff);
-}
-
-/* Convert RGB string(#RRGGBB) to hex(0xRRGGBB) */
-inline uint32_t str2hex(const char *str) {
-    if (str[0] != '#') return DEFAULT_COLOR;
-    return (uint32_t) strtol(str + 1, NULL, 16);
-}
-
-/* Convert hex(0xRRGGBB) to RGB string(#RRGGBB) */
-inline void hex2str(uint32_t hex, char *str) {
-    sprintf(str, "#%06x", hex);
-}
-
-/*
- * Convert Kelvin(K) to hex(0xRRGGBB)
- * From http://www.tannerhelland.com/4435/convert-temperature-rgb-algorithm-code/
- */
-uint32_t kelvin2rgb(uint32_t t) {
-    double temperature = (double) t / 100;
-    double red, green, blue;
-    // Red
-    if (temperature <= 66) {
-        red = 255;
-    } else {
-        red = temperature - 60;
-        red = 329.698727446 * pow(red, -0.1332047592);
-        red = constrain(red, 0, 255);
-    }
-    // Green
-    if (temperature <= 66) {
-        green = temperature;
-        green = 99.4708025861 * log(green) - 161.1195681661;
-        green = constrain(green, 0, 255);
-    } else {
-        green = temperature - 60;
-        green = 288.1221695283 * pow(green, -0.0755148492);
-        green = constrain(green, 0, 255);
-    }
-    // Blue
-    if (temperature >= 66) {
-        blue = 255;
-    } else if (temperature <= 19) {
-        blue = 0;
-    } else {
-        blue = temperature - 10;
-        blue = 138.5177312231 * log(blue) - 305.0447927307;
-        blue = constrain(blue, 0, 255);
-    }
-    return rgb2hex((uint8_t) red, (uint8_t) green, (uint8_t) blue);
-}
-
-void readSettings() {
-    Serial.println(F("Reading settings."));
-    File file = LittleFS.open("/config.json", "r");
-    StaticJsonDocument<600> doc;
-    DeserializationError error = deserializeJson(doc, file);
-    if (error) {
-        Serial.println(F("Can't read settings."));
-        Serial.println(error.f_str());
-    } else {
-        serializeJson(doc, Serial);
-        Serial.println();
-    }
-    config.name = doc["name"] | NAME;
-    config.ssid = doc["ssid"] | "";
-    config.password = doc["password"] | "";
-    config.hostname = doc["hostname"] | HOST_NAME;
-    String ip = doc["ip"];
-    String gateway = doc["gateway"];
-    String netmask = doc["netmask"];
-    config.ip.fromString(ip);
-    config.gateway.fromString(gateway);
-    config.netmask.fromString(netmask);
-    config.mode = doc["mode"] | CONSTANT;
-    config.brightness = doc["brightness"] | 150;
-    config.temperature = doc["temperature"] | 6600;
-    config.refreshRate = doc["refreshRate"] | 60;
-    file.close();
-}
-
-void saveSettings() {
-    Serial.println(F("Saving settings."));
-    File file = LittleFS.open("/config.json", "w");
-    StaticJsonDocument<600> doc;
+void serializeSettings(JsonDocument &doc) {
     doc["name"] = config.name;
     doc["ssid"] = config.ssid;
     doc["password"] = config.password;
     doc["hostname"] = config.hostname;
-    doc["ip"] = config.ip ? config.ip.toString() : "";
-    doc["gateway"] = config.gateway ? config.gateway.toString() : "";
-    doc["netmask"] = config.netmask ? config.netmask.toString() : "";
-    doc["mode"] = config.mode;
+    doc["refreshRate"] = config.refreshRate;
     doc["brightness"] = config.brightness;
     doc["temperature"] = config.temperature;
-    doc["refreshRate"] = config.refreshRate;
+    lightEffect->writeToJSON(doc);
+}
+
+void saveSettings() {
+    Serial.println(F("Save settings"));
+    StaticJsonDocument<1024> doc;
+    doc["version"] = version_code;
+    serializeSettings(doc);
+    File file = LittleFS.open("/config.json", "w");
     if (!serializeJson(doc, file)) {
-        Serial.println(F("Can't save settings."));
+        Serial.println(F("Save settings failed"));
     }
     file.close();
     config.isDirty = false;
 }
 
-void loadAnimation(String &str) {
-    // 从字符串读取动画
-}
-
-void saveAnimation(String &str) {
-    File file = LittleFS.open("/animation.csv", "w");
-    file.print(str);
-    file.close();
-}
-
-void readLights() {
-    Serial.println(F("Reading light."));
-    if (config.mode == ANIMATION) {
-        File file = LittleFS.open("/animation.csv", "r");
-        String str = file.readString();
-        loadAnimation(str);
+void readSettings() {
+    Serial.println(F("Read settings"));
+    bool shouldSave = false;
+    StaticJsonDocument<1024> doc;
+    if (!LittleFS.exists("/config.json")) {
+        Serial.println(F("Setting not found, create new"));
+        shouldSave = true;
+    } else {
+        File file = LittleFS.open("/config.json", "r");
+        DeserializationError error = deserializeJson(doc, file);
         file.close();
-    } else if (config.mode != CUSTOM) {
-        File file = LittleFS.open("/light.bin", "r");
-        file.read((uint8_t*) &light, sizeof(light));
-        file.close();
+        if (error) {
+            Serial.print(F("Read settings failed: "));
+            Serial.println(error.f_str());
+            shouldSave = true;
+        }
+    }
+    if (doc["version"] != version_code) {
+        Serial.printf_P(PSTR("Update settings from %d to %d\n"), doc["version"].as<int>(), version_code);
+        shouldSave = true;
+    }
+    config.name = doc["name"] | NAME;
+    config.ssid = doc["ssid"].as<const char *>();
+    config.password = doc["password"].as<const char *>();
+    config.hostname = doc["hostname"] | product_name;
+    config.refreshRate = doc["refreshRate"] | 60;
+    config.brightness = doc["brightness"] | 63;
+    config.temperature = doc["temperature"] | 6600;
+    lightEffect = Effect::readFromJSON<LIGHT_TYPE>(doc);
+
+    FastLED.setBrightness(config.brightness);
+    FastLED.setTemperature(CRGB(kelvin2rgb(config.temperature)));
+    timer.attach_ms(1000 / config.refreshRate, updateLight);
+    
+    if (shouldSave) {
+        saveSettings();
     }
 }
 
-void saveLights() {
-    Serial.println(F("Saving light."));
-    if (config.mode == ANIMATION) {
-        // We don't save animation there
-    } else if (config.mode != CUSTOM) {
-        File file = LittleFS.open("/light.bin", "w");
-        file.write((const uint8_t*) &light, sizeof(light));
-        file.close();
+int scanWifi(JsonArray &array) {
+    Serial.println(F("Start to scan wifi"));
+    int n = WiFi.scanNetworks();
+    if (n > 0) {
+        Serial.printf_P(PSTR("%d wifi(s) found:\n"), n);
+        for (int i = 0; i < n; ++i) {
+            JsonObject obj = array.createNestedObject();
+            obj["ssid"] = WiFi.SSID(i);
+            obj["rssi"] = WiFi.RSSI(i);
+            obj["type"] = WiFi.encryptionType(i);
+            Serial.printf_P(PSTR("%d: %s (%d)%c\n"), i + 1, WiFi.SSID(i).c_str(), WiFi.RSSI(i),
+                (WiFi.encryptionType(i) == ENC_TYPE_NONE) ? ' ' : '*');
+        }
+    } else {
+        Serial.println(F("No wifi found"));
     }
-    config.isLightDirty = false;
+    Serial.println(F("Scan wifi finished"));
+    return n;
 }
 
-void markDirty(bool isLight = false) {
-    config.lastModifyTime = millis();
-    if (isLight) config.isLightDirty = true;
-    else config.isDirty = true;
+bool connectWifi(const String &ssid, const String &password) {
+    Serial.println(F("Connecting to wlan"));
+    if (ssid.isEmpty()) {
+        Serial.println(F("Wifi SSID is empty"));
+        return false;
+    }
+    WiFi.begin(ssid, password);
+    time_t t = millis();
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.print(".");
+        if (millis() - t > 10 * 1000) {
+            Serial.println();
+            Serial.println(F("Can't connect to wlan"));
+            return false;
+        }
+    }
+    Serial.println();
+    Serial.print(F("Connect to wlan successfully, IP: "));
+    Serial.println(WiFi.localIP());
+    return true;
 }
 
-void handleCommand(const Sender &sender, char *line) {
-    if (config.mode == MUSIC) {
-        char c = tolower(line[0]);
-        if (c != 'm' && c != 'i') {
-            light.music.currentVolume = atof(line);
+bool startHotspot() {
+    Serial.println(F("Start wifi hotspot"));
+    bool result = WiFi.softAP(config.name);
+    if (result) {
+        Serial.print(F("Start hotspot successfully, IP: "));
+        Serial.println(WiFi.softAPIP());
+    } else {
+        Serial.println(F("Can't start hotspot"));
+    }
+    return result;
+}
+
+void updateLight() {
+    if (lightEffect->update(light, 0)) {
+        FastLED.show();
+        // delayMicroseconds(100);
+    }
+}
+
+void handleCommand(SenderFunc sender, char *line) {
+    if (lightEffect->type() == MUSIC) {
+        if (!isalpha(line[0])) { // 假定所有命令都是字母开头且以字母开头的一定是命令
+            ((MusicEffect<LIGHT_TYPE> *) lightEffect)->setVolume(atof(line));
             return;
         }
-    } else if (config.mode == CUSTOM) {
-        char c = tolower(line[0]);
-        if (c != 'm' && c != 'i') {
+    } else if (lightEffect->type() == CUSTOM) {
+        if (!isalpha(line[0])) {
             uint32_t color = str2hex(line);
-            leds[light.custom.index++] = CRGB(color);
-            if (light.custom.index >= LED_COUNT) light.custom.index = 0;
+            int &index = ((CustomEffect<LIGHT_TYPE> *) lightEffect)->getIndex();
+            light.data()[index++] = CRGB(color);
+            if (index >= light.count()) {
+                index = 0;
+            }
             return;
         }
     }
-    commandHandler.parseCommand(sender, line);
+    cmdHandler.parseCommand(sender, line);
 }
 
-void clearBuffer(bool clearAll = false) {
-    serialBufPos = 0;
-    if (clearAll) {
-        memset(serialBuffer, 0, sizeof(serialBuffer));
-        return;
+void initEffects() {
+    effectFactories[CONSTANT] = [](int argc, const char *argv[]) {
+        uint32_t color = argc > 0 ? str2hex(argv[0]) : DEFAULT_COLOR;
+        return new ConstantEffect<LIGHT_TYPE>(color);
+    };
+    effectFactories[BLINK] = [](int argc, const char *argv[]) {
+        uint32_t color = argc > 0 ? str2hex(argv[0]) : DEFAULT_COLOR;
+        float lastTime = argc > 1 ? atof(argv[1]) : 1.0;
+        float interval = argc > 2 ? atof(argv[2]) : 1.0;
+        return new BlinkEffect<LIGHT_TYPE>(color, lastTime, interval);
+    };
+    effectFactories[BREATH] = [](int argc, const char *argv[]) {
+        uint32_t color = argc > 0 ? str2hex(argv[0]) : DEFAULT_COLOR;
+        float lastTime = argc > 1 ? atof(argv[1]) : 1.0;
+        float interval = argc > 2 ? atof(argv[2]) : 0.5;
+        return new BreathEffect<LIGHT_TYPE>(color, lastTime, interval);
+    };
+    effectFactories[CHASE] = [](int argc, const char *argv[]) {
+        uint32_t color    = argc > 0 ? str2hex(argv[0]) : DEFAULT_COLOR;
+        uint8_t direction = argc > 1 ? atoi(argv[1]) : 0;
+        float lastTime    = argc > 2 ? atof(argv[2]) : 0.2;
+        return new ChaseEffect<LIGHT_TYPE>(color, direction, lastTime);
+    };
+    effectFactories[RAINBOW] = [](int argc, const char *argv[]) {
+        int8_t delta = argc > 0 ? atoi(argv[0]) : 1;
+        return new RainbowEffect<LIGHT_TYPE>(delta);
+    };
+    effectFactories[STREAM] = [](int argc, const char *argv[]) {
+        uint8_t direction = argc > 0 ? atoi(argv[0]) : 0;
+        int8_t delta      = argc > 1 ? atoi(argv[1]) : 1;
+        return new StreamEffect<LIGHT_TYPE>(direction, delta);
+    };
+    effectFactories[ANIMATION] = [](int argc, const char *argv[]) {
+        const char *name = argc > 0 ? argv[0] : "";
+        return new AnimationEffect<LIGHT_TYPE>(name);
+    };
+    effectFactories[MUSIC] = [](int argc, const char *argv[]) {
+        uint8_t mode = argc > 0 ? atoi(argv[0]) : 1;
+        return new MusicEffect<LIGHT_TYPE>(mode);
+    };
+    effectFactories[CUSTOM] = [](int argc, const char *argv[]) {
+        return new CustomEffect<LIGHT_TYPE>();
+    };
+}
+
+void registerCommands() {
+    cmdHandler.setDefaultHandler([](SenderFunc sender, int argc, char *argv[]) {
+        sender("Unknown command. type 'help' for helps.");
+    });
+    cmdHandler.registerCommand("help", "Show command helps", [](SenderFunc sender, int argc, char *argv[]) {
+        cmdHandler.printHelp(sender);
+    });
+#ifdef ENABLE_DEBUG
+    cmdHandler.registerCommand("debug", "Show debug info", [](SenderFunc sender, int argc, char *argv[]) {
+        printSystemInfo();
+        printWifiInfo();
+    });
+#endif
+    cmdHandler.registerCommand("version", "Show version", [](SenderFunc sender, int argc, char *argv[]) {
+        StaticJsonDocument<256> doc;
+        doc["product"] = product_name;
+        doc["model"] = model_name;
+        doc["id"] = ESP.getChipId();
+        doc["version"] = version;
+        doc["versionCode"] = version_code;
+        doc["sdkVersion"] = ESP.getFullVersion();
+        String str;
+        serializeJson(doc, str);
+        sender(str.c_str());
+    });
+    cmdHandler.registerCommand("status", "Show status", [](SenderFunc sender, int argc, char *argv[]) {
+        StaticJsonDocument<256> doc;
+        doc["vcc"] = ESP.getVcc() / 1000.0;
+        doc["resetReason"] = ESP.getResetReason();
+        doc["freeHeap"] = ESP.getFreeHeap();
+        doc["heapFragment"] = ESP.getHeapFragmentation();
+        doc["maxFreeBlock"] = ESP.getMaxFreeBlockSize();
+        doc["RSSI"] = WiFi.RSSI();
+        FSInfo fs_info;
+        LittleFS.info(fs_info);
+        doc["fsTotalSpace"] = fs_info.totalBytes;
+        doc["fsUsedSpace"] = fs_info.usedBytes;
+        String str;
+        serializeJson(doc, str);
+        sender(str.c_str());
+    });
+    cmdHandler.registerCommand("config", "Get config", [](SenderFunc sender, int argc, char *argv[]) {
+        StaticJsonDocument<1024> doc;
+        if (WiFi.getMode() == WIFI_AP) {
+            struct ip_info info;
+            wifi_get_ip_info(SOFTAP_IF, &info);
+            doc["ip"] = IPAddress(info.ip.addr).toString();
+            doc["mask"] = IPAddress(info.netmask.addr).toString();
+            doc["gateway"] = IPAddress(info.gw.addr).toString();
+        } else {
+            doc["ip"] = WiFi.localIP().toString();
+            doc["mask"] = WiFi.subnetMask().toString();
+            doc["gateway"] = WiFi.gatewayIP().toString();
+        }
+        serializeSettings(doc);
+        String str;
+        serializeJson(doc, str);
+        sender(str.c_str());
+    });
+    cmdHandler.registerCommand("scan", "Scan wifi", [](SenderFunc sender, int argc, char *argv[]) {
+        DynamicJsonDocument doc(1024);
+        JsonArray array = doc.to<JsonArray>();
+        scanWifi(array);
+        String str;
+        serializeJson(doc, str);
+        sender(str.c_str());
+    });
+    cmdHandler.registerCommand("connect", "Connect to wifi", [](SenderFunc sender, int argc, char *argv[]) {
+        if (argc <= 1) {
+            sender("INVAILD");
+            return;
+        }
+        String ssid(argv[1]);
+        String password(argc > 2 ? argv[2] : "");
+        if (connectWifi(ssid, password)) {
+            sender(WiFi.localIP().toString().c_str());
+            WiFi.mode(WIFI_STA);
+            config.ssid = ssid;
+            config.password = password;
+            markDirty();
+        } else {
+            sender("ERR");
+            if (WiFi.getMode() == WIFI_STA && !connectWifi(config.ssid, config.password)) {
+                startHotspot();
+                WiFi.mode(WIFI_AP);
+            }
+        }
+    });
+    cmdHandler.registerCommand("disconnect", "Disconnect from wifi", [](SenderFunc sender, int argc, char *argv[]) {
+        startHotspot();
+        sender("OK");
+        WiFi.mode(WIFI_AP);
+        config.ssid = "";
+        config.password = "";
+        markDirty();
+    });
+    cmdHandler.registerCommand("name", "Get/set device name", [](SenderFunc sender, int argc, char *argv[]) {
+        if (argc <= 1) {
+            String str = config.name + String(',') + config.hostname;
+            sender(str.c_str());
+            return;
+        }
+        config.name = argv[1];
+        if (argc > 2) config.hostname = argv[2];
+        markDirty();
+        sender("OK");
+    });
+    cmdHandler.registerCommand("mode", "Get/set light mode", [](SenderFunc sender, int argc, char *argv[]) {
+        if (argc <= 1) {
+            String str = effect2str(lightEffect->type());
+            sender(str.c_str());
+            return;
+        }
+        EffectType type = str2effect(argv[1]);
+        if (type >= CONSTANT && type < EFFECT_TYPE_COUNT) {
+            delete lightEffect;
+            lightEffect = effectFactories[type](argc - 2, (const char **) argv + 2);
+            markDirty();
+            sender("OK");
+        } else {
+            sender("INVAILD");
+        }
+    });
+    cmdHandler.registerCommand("brightness", "Get/set brightness", [](SenderFunc sender, int argc, char *argv[]) {
+        if (argc <= 1) {
+            String str = String(config.brightness);
+            sender(str.c_str());
+            return;
+        }
+        int brightness = atoi(argv[1]);
+        if (brightness >= 0 && brightness <= 255) {
+            if (config.brightness != brightness) {
+                FastLED.setBrightness(brightness);
+                FastLED.show();
+                config.brightness = (uint8_t) brightness;
+                markDirty();
+            }
+            sender("OK");
+        } else {
+            sender("INVAILD");
+        }
+    });
+    cmdHandler.registerCommand("temperature", "Get/set temperature", [](SenderFunc sender, int argc, char *argv[]) {
+        if (argc <= 1) {
+            String str = String(config.temperature) + String('K');
+            sender(str.c_str());
+            return;
+        }
+        int temperature = atoi(argv[1]);
+        if (temperature >= 0) {
+            if (config.temperature != temperature) {
+                FastLED.setTemperature(CRGB(kelvin2rgb(temperature)));
+                FastLED.show();
+                config.temperature = (uint32_t) temperature;
+                markDirty();
+            }
+            sender("OK");
+        } else {
+            sender("INVAILD");
+        }
+    });
+    cmdHandler.registerCommand("fps", "Get/set refresh rate", [](SenderFunc sender, int argc, char *argv[]) {
+        if (argc <= 1) {
+            String str = String(config.refreshRate);
+            sender(str.c_str());
+            return;
+        }
+        int rate = atoi(argv[1]);
+        if (rate > 0 && rate <= 400) {
+            if (config.refreshRate != rate) {
+                if (timer.active()) timer.detach();
+                timer.attach_ms(1000 / rate, updateLight);
+                config.refreshRate = (uint16_t) rate;
+                markDirty();
+            }
+            sender("OK");
+        } else {
+            sender("INVAILD");
+        }
+    });
+}
+
+ADC_MODE(ADC_VCC); // Enable ESP.getVcc()
+
+void setup() {
+    FastLED.addLeds<LED_TYPE, LED_DATA_PIN, LED_COLOR_ORDER>(light.data(), light.count());
+#ifdef LED_CORRECTION
+    FastLED.setCorrection(CRGB(LED_CORRECTION));
+#endif
+#ifdef LED_MAX_POWER_MW
+    // TODO FastLED 的功率限制是在刷新灯珠的时候做的, 但我需要限制的是最大亮度
+    FastLED.setMaxPowerInMilliWatts(LED_MAX_POWER_MW);
+#endif
+    FastLED.clear(true);
+
+    Serial.begin(115200);
+    Serial.println();
+    Serial.print(F("RGB Light, version: "));
+    Serial.println(version);
+    Serial.println(F("Made by QingChenW with love"));
+#ifdef ENABLE_DEBUG
+    gdbstub_init(); // XXX 在 esp8266-arduino 3.0+ 上疑似会严重干扰 LED 时序
+#endif
+
+    LittleFS.begin();
+    readSettings();
+
+    WiFi.persistent(false);
+    WiFi.setAutoReconnect(true);
+    if (connectWifi(config.ssid, config.password)) {
+        WiFi.mode(WIFI_STA);
+    } else {
+        startHotspot();
+        WiFi.mode(WIFI_AP);
     }
-    serialBuffer[0] = '\0';
+    WiFi.hostname(config.hostname);
+
+    initEffects();
+    registerCommands();
+    Serial.println(F("Start DNS server"));
+    dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
+    if (dnsServer.start(53, "*", WiFi.softAPIP())) {
+        Serial.println(F("DNS server started"));
+    }
+    Serial.println(F("Start HTTP server"));
+    webServer.onNotFound([]() {
+        // Implement Captive Portal
+        webServer.sendHeader("Location", String("/"), true);
+        webServer.send(302, MIME_TYPE(txt), "");
+    });
+    webServer.on("/version", HTTP_GET, []() {
+        cmdHandler.parseCommand([](const char *msg) {
+            webServer.send(200, MIME_TYPE(json), msg);
+        }, "version");
+    });
+    webServer.on("/status", HTTP_GET, []() {
+        cmdHandler.parseCommand([](const char *msg) {
+            webServer.send(200, MIME_TYPE(json), msg);
+        }, "status");
+    });
+    webServer.on("/config", HTTP_GET, []() {
+        cmdHandler.parseCommand([](const char *msg) {
+            webServer.send(200, MIME_TYPE(json), msg);
+        }, "config");
+    });
+    static std::function<bool(String&)> checkPath = [](String &path) {
+        if (path.isEmpty()) {
+            webServer.send(400, MIME_TYPE(txt), PSTR("Bad request"));
+            return false;
+        }
+        if (!LittleFS.exists(path)) {
+            webServer.send(404, MIME_TYPE(txt), PSTR("Not found"));
+            return false;
+        }
+        return true;
+    };
+    webServer.on("/list", HTTP_GET, []() {
+        String path = webServer.arg("path");
+        if (!checkPath(path)) {
+            return;
+        }
+        DynamicJsonDocument doc(1024);
+        JsonArray array = doc.to<JsonArray>();
+        Dir dir = LittleFS.openDir(path);
+        while (dir.next()) {
+            JsonObject obj = array.createNestedObject();
+            obj["name"] = dir.fileName();
+            obj["size"] = dir.fileSize();
+            obj["isDir"] = dir.isDirectory();
+        }
+        String str;
+        serializeJson(doc, str);
+        webServer.send(200, MIME_TYPE(json), str);
+    });
+    webServer.on("/download", HTTP_GET, []() {
+        String path = webServer.arg("path");
+        if (!checkPath(path)) {
+            return;
+        }
+        File file = LittleFS.open(path, "r");
+        Serial.printf_P(PSTR("Download file: %s\n"), file.name());
+        webServer.streamFile(file, FPSTR(MIME_TYPE(none)));
+        file.close();
+    });
+    webServer.on("/upload", HTTP_POST, []() {
+        webServer.send(200, MIME_TYPE(txt), PSTR("OK"));
+    }, []() {
+        static File uploadFile;
+        HTTPUpload &upload = webServer.upload();
+        if (upload.status == UPLOAD_FILE_START) {
+            String path = webServer.arg("path");
+            if (path.isEmpty()) {
+                webServer.send(400, MIME_TYPE(txt), PSTR("Bad request"));
+                return;
+            }
+            path = path + "/" + upload.filename;
+            uploadFile = LittleFS.open(path, "w");
+            if (!uploadFile) {
+                webServer.send(500, MIME_TYPE(txt), PSTR("Internal server error"));
+                return;
+            }
+            Serial.printf_P(PSTR("Upload started, file: %s\n"), path.c_str());
+        } else if (upload.status == UPLOAD_FILE_WRITE) {
+            if (uploadFile) {
+                if (uploadFile.write(upload.buf, upload.currentSize) != upload.currentSize) {
+                    webServer.send(500, MIME_TYPE(txt), PSTR("Internal server error"));
+                    return;
+                }
+            }
+            Serial.printf_P(PSTR("Uploading, size: %u\n"), upload.currentSize);
+        } else if (upload.status == UPLOAD_FILE_END) {
+            if (uploadFile) {
+                uploadFile.close();
+            }
+            Serial.printf_P(PSTR("Upload finished, size: %u\n"), upload.totalSize);
+        }
+    });
+    webServer.on("/delete", HTTP_GET, []() {
+        String path = webServer.arg("path");
+        if (!checkPath(path)) {
+            return;
+        }
+        if (LittleFS.remove(path)) {
+            webServer.send(200, MIME_TYPE(txt), PSTR("OK"));
+        } else {
+            webServer.send(500, MIME_TYPE(txt), PSTR("Internal server error"));
+        }
+    });
+    webServer.on("/upgrade", HTTP_GET, []() {
+        String path = webServer.arg("path");
+        if (!checkPath(path)) {
+            return;
+        }
+        bool success = false;
+        uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
+        if (Update.begin(maxSketchSpace)) { // Update 能升级文件系统, 但为了避免刷掉用户的动画文件, 我决定不用
+            Serial.println(F("Start to update"));
+            File file = LittleFS.open(path, "r");
+            if (file) {
+                uint32_t writtenSize = Update.writeStream(file);
+                if (writtenSize == file.size() && Update.end(true)) {
+                    Serial.printf_P(PSTR("Update success, size: %u\n"), writtenSize);
+                    success = true;
+                } else {
+                    Update.printError(Serial);
+                }
+                file.close();
+            } else {
+                Serial.println(F("Open OTA file failed"));
+            }
+        } else {
+            Update.printError(Serial);
+        }
+        if (success) {
+            webServer.send(200, MIME_TYPE(txt), PSTR("OK"));
+        } else {
+            webServer.send(500, MIME_TYPE(txt), PSTR("Internal server error"));
+        }
+    });
+    webServer.serveStatic("/", LittleFS, "/www/", "max-age=300");
+    webServer.begin();
+    Serial.println(F("Start WebSocket server"));
+    wsServer.onEvent([](uint8_t num, WStype_t type, uint8_t *payload, size_t length) {
+        switch (type) {
+            case WStype_CONNECTED: { // payload is "/"
+                IPAddress ip = wsServer.remoteIP(num);
+                Serial.printf_P(PSTR("Client %u connected from %s\n"), num, ip.toString().c_str());
+                break;
+            }
+            case WStype_DISCONNECTED: {
+                Serial.printf_P(PSTR("Client %u disconnected\n"), num);
+                break;
+            }
+            case WStype_TEXT: {
+                char *str = (char*) payload;
+                if (length > 0) {
+#ifdef ENABLE_DEBUG
+                    Serial.printf("Received message from ws%u: %s\n", num, str);
+#endif
+                    handleCommand([num](const char *msg) {
+                        wsServer.sendTXT(num, msg, strlen(msg));
+                    }, str);
+                    yield();
+                }
+                break;
+            }
+        }
+    });
+    wsServer.begin();
+    Serial.println(F("Start mDNS"));
+    if (MDNS.begin(config.hostname)) { // FIXME 电脑上的 chrome 无法主动发现设备, 但是 Android APP 能
+        MDNS.addService("http", "tcp", 80);
+        // MDNS.addService("ws", "tcp", 81);
+        MDNS.addServiceTxt("http", "tcp", "product", product_name);
+        MDNS.addServiceTxt("http", "tcp", "version", version);
+        MDNS.addServiceTxt("http", "tcp", "name", config.name);
+        Serial.println(F("MDNS responder started"));
+    }
 }
 
-void readSerial() {
+void loop() {
+    if (config.isDirty && millis() - config.lastModifyTime >= CONFIG_SAVE_PERIOD) {
+        saveSettings();
+    }
     while (Serial.available() > 0) {
-        char c = Serial.read();
-        if (c == '\r' || c == '\n') {
-            serialBuffer[serialBufPos] = '\0';
-            if (serialBufPos > 0) {
-#ifdef DEBUG_WC
-                Serial.printf("Received data from com: %s.", serialBuffer);
+        char buffer[128];
+        size_t len = Serial.readBytesUntil('\n', buffer, sizeof(buffer) - 1);
+        if (len > 0) {
+            buffer[len] = '\0';
+#ifdef ENABLE_DEBUG
+            Serial.printf("Received data from com: %s\n", buffer);
 #endif
-                Serial.println();
-                handleCommand(ss, serialBuffer);
-            }
-            clearBuffer();
-        } else if (serialBufPos < SERIAL_BUFFER && isprint(c)) {
-            serialBuffer[serialBufPos++] = c;
+            handleCommand([](const char *msg) {
+                Serial.println(msg);
+            }, buffer);
+            yield();
         }
     }
+    dnsServer.processNextRequest();
+    webServer.handleClient();
+    wsServer.loop();
+    MDNS.update();
 }
 
-void webSocketHandler(uint8_t num, WStype_t type, uint8_t *payload, size_t length) {
-    switch (type) {
-        case WStype_CONNECTED: {
-            // payload is "/"
-            IPAddress ip = wsServer.remoteIP(num);
-            Serial.printf("Client %u connected from %s.", num, ip.toString().c_str());
-            Serial.println();
-            wsServer.sendTXT(num, "Connect successfully!");
-            break;
-        }
-        case WStype_DISCONNECTED: {
-            Serial.printf("Client %u has disconnected.", num);
-            Serial.println();
-            break;
-        }
-        case WStype_TEXT: {
-            char *str = reinterpret_cast<char*>(payload);
-            if (length > 0) {
-#ifdef DEBUG_WC
-                Serial.printf("Received message from %u: %s.", num, str);
-                Serial.println();
-#endif
-                WebSocketSender ws(num);
-                handleCommand(ws, str);
-            }
-            break;
-        }
-        default: break;
-    }
-}
-
-void showSystemInfo() {
-    Serial.println("----- System information -----");
+#ifdef ENABLE_DEBUG
+void printSystemInfo() {
+    Serial.println("----- System Information -----");
     Serial.printf("Supply voltage: %.3fV\r\n", ESP.getVcc() / 1000.0);
     Serial.printf("Reset reason: %s\r\n", ESP.getResetReason().c_str());
     Serial.printf("Chip ID: %u\r\n", ESP.getChipId());
@@ -404,68 +705,8 @@ void showSystemInfo() {
     Serial.printf("Cycle count: %u\r\n", ESP.getCycleCount());
 }
 
-String scanWifi() {
-    Serial.println(F("Start to scan wifi."));
-    DynamicJsonDocument doc(1024);
-    JsonArray array = doc.to<JsonArray>();
-    int n = WiFi.scanNetworks();
-    if (n > 0) {
-        Serial.printf("%d wifi found.", n);
-        Serial.println();
-        for (int i = 0; i < n; ++i) {
-            JsonObject obj = array.createNestedObject();
-            obj["ssid"] = WiFi.SSID(i);
-            obj["rssi"] = WiFi.RSSI(i);
-            obj["type"] = WiFi.encryptionType(i);
-            Serial.printf("%d: %s (%d)%c", i + 1, WiFi.SSID(i).c_str(), WiFi.RSSI(i),
-                (WiFi.encryptionType(i) == ENC_TYPE_NONE) ? ' ' : '*');
-            Serial.println();
-            delay(10);
-        }
-    } else {
-        Serial.println(F("No wifi found."));
-    }
-    Serial.println(F("Scan wifi finished."));
-    String jsonStr;
-    serializeJson(doc, jsonStr);
-    return jsonStr;
-}
-
-bool connectWifi(String &ssid, String &password) {
-    Serial.println(F("Connecting to wlan."));
-    if (ssid.isEmpty()) {
-        Serial.println(F("Wifi SSID is empty."));
-        return false;
-    }
-    if (config.ip && config.gateway && config.netmask) {
-        WiFi.config(config.ip, config.gateway, config.netmask);
-    }
-    WiFi.begin(ssid, password);
-    time_t t = millis();
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
-        if (millis() - t > WIFI_TIMEOUT) {
-            Serial.println();
-            Serial.println(F("Can't connect to wlan."));
-            return false;
-        }
-    }
-    WiFi.hostname(config.hostname);
-    Serial.println();
-    Serial.println(F("Connect to wlan successfully."));
-    return true;
-}
-
-bool openHotspot() {
-    Serial.println(F("Start wifi hotspot."));
-    bool result = WiFi.softAP(config.name);
-    Serial.println(result);
-    delay(500);
-    return result;
-}
-
-void showWifiInfo() {
+void printWifiInfo() {
+    Serial.println("----- WIFI Information -----");
     Serial.printf("Current mode: %d\r\n", WiFi.getMode());
     Serial.println("----- STA Info -----");
     Serial.printf("Connected: %s\r\n", WiFi.isConnected() ? "true" : "false");
@@ -510,510 +751,4 @@ void showWifiInfo() {
         Serial.printf("Beacon interval: %d\r\n", config.beacon_interval);
     }
 }
-
-void setMode(LightType mode) {
-    currentFrame = 0;
-    if (config.mode != mode) {
-        config.mode = mode;
-        markDirty();
-    }
-}
-
-void setConstant(uint32_t color = DEFAULT_COLOR) {
-    light.constant.currentColor = CRGB(color);
-    markDirty(true);
-}
-
-void setBlink(uint32_t color = DEFAULT_COLOR, float lastTime = 1.0, float interval = 1.0) {
-    light.blink.currentColor = CRGB(color);
-    light.blink.lastTime = lastTime > 0 ? lastTime : 1.0;
-    light.blink.interval = interval >= 0 ? interval : 1.0;
-    markDirty(true);
-}
-
-void setBreath(uint32_t color = DEFAULT_COLOR, float lastTime = 1.0, float interval = 0.5) {
-    light.breath.currentColor = CRGB(color);
-    light.breath.lastTime = lastTime > 0 ? lastTime : 1.0;
-    light.breath.interval = interval >= 0 ? interval : 0.5;
-    markDirty(true);
-}
-
-void setChase(uint32_t color = DEFAULT_COLOR, float lastTime = 0.2) {
-    light.chase.currentColor = CRGB(color);
-    light.chase.lastTime = lastTime ? lastTime : 0.2;
-    markDirty(true);
-}
-
-void setRainbow(int8_t delta = 1) {
-    light.rainbow.delta = delta != 0 ? delta : 1;
-    markDirty(true);
-}
-
-void setStream(int8_t delta = 1) {
-    light.stream.delta = delta != 0 ? delta : 1;
-    markDirty(true);
-}
-
-void setMusic(uint8_t type = 1) {
-    light.music.type = type;
-    light.music.currentHue = 0;
-    light.music.currentVolume = 0.0;
-    markDirty(true);
-}
-
-void setBrightness(uint8_t brightness) {
-    if (config.brightness != brightness) {
-        FastLED.setBrightness(brightness);
-        FastLED.show();
-        config.brightness = brightness;
-        markDirty();
-    }
-}
-
-void setTemperature(uint32_t temperature) {
-    if (config.temperature != temperature) {
-        FastLED.setTemperature(CRGB(kelvin2rgb(temperature)));
-        FastLED.show();
-        config.temperature = temperature;
-        markDirty();
-    }
-}
-
-void setRefreshRate(uint8_t rate) {
-    if (config.refreshRate != rate) {
-        currentFrame = 0;
-        if (timer.active()) timer.detach();
-        timer.attach_ms(1000 / rate, updateLight);
-        config.refreshRate = rate;
-        markDirty();
-    }
-}
-
-void updateLight() {
-    if (config.mode == CONSTANT) {
-        if (leds[0] != light.constant.currentColor) {
-            fill_solid(leds, LED_COUNT, light.constant.currentColor);
-            FastLED.show();
-        }
-    } else if (config.mode == BLINK) {
-        int lastTime = config.refreshRate * light.blink.lastTime;
-        int interval = config.refreshRate * light.blink.interval;
-        if (currentFrame == 0) {
-            fill_solid(leds, LED_COUNT, light.blink.currentColor);
-            FastLED.show();
-        } else if (currentFrame == lastTime) {
-            fill_solid(leds, LED_COUNT, CRGB::Black);
-            FastLED.show();
-        }
-        if (++currentFrame >= lastTime + interval) currentFrame = 0;
-    } else if (config.mode == BREATH) {
-        int lastTime = config.refreshRate * light.breath.lastTime;
-        int interval = config.refreshRate * light.breath.interval;
-        if (currentFrame <= lastTime) {
-            CRGB rgb = light.breath.currentColor;
-            double x = (double) currentFrame / lastTime;
-            int scale = -1010 * x * x + 1010 * x;
-            rgb.nscale8(scale);
-            fill_solid(leds, LED_COUNT, rgb);
-            FastLED.show();
-        }
-        if (++currentFrame >= lastTime + interval) currentFrame = 0;
-    } else if (config.mode == CHASE) {
-        int lastTime = config.refreshRate * light.chase.lastTime;
-        if (currentFrame % lastTime == 0) {
-            fill_solid(leds, LED_COUNT, CRGB::Black);
-            int index = currentFrame / lastTime;
-            if (index > LED_COUNT * 2 - 1) {
-                currentFrame = 0;
-                index = 0;
-            } else if (index > LED_COUNT - 1) {
-                index = 59 - index;
-            }
-            leds[index] = light.chase.currentColor;
-            FastLED.show();
-        }
-        ++currentFrame;
-    } else if (config.mode == RAINBOW) {
-        CHSV hsv(light.rainbow.currentHue, 255, 240);
-        CRGB rgb;
-        hsv2rgb_rainbow(hsv, rgb);
-        fill_solid(leds, LED_COUNT, rgb);
-        FastLED.show();
-        light.rainbow.currentHue += light.rainbow.delta;
-    } else if (config.mode == STREAM) {
-        fill_rainbow(leds, LED_COUNT, light.stream.currentHue);
-        FastLED.show();
-        light.stream.currentHue += light.stream.delta;
-    } else if (config.mode == ANIMATION) {
-        // 播放动画
-    } else if (config.mode == MUSIC) {
-        if (light.music.type) {
-            // TODO 音乐律动可以优化一下
-            // 分奇偶讨论???
-            int count = LED_COUNT * light.music.currentVolume;
-            CHSV hsv(light.music.currentHue++, 255, 240);
-            CRGB rgb;
-            hsv2rgb_rainbow(hsv, rgb);
-            fill_solid(leds, LED_COUNT, CRGB::Black);
-            fill_solid(leds + (LED_COUNT - count) / 2, count, rgb);
-            FastLED.show();
-        } else {
-            int count = LED_COUNT * light.music.currentVolume;
-            fill_solid(leds, LED_COUNT, CRGB::Black);
-            if (count > 0) {
-                fill_solid(leds, count - 1, CRGB::Green);
-                leds[count - 1] = CRGB::Red;
-            }
-            FastLED.show();
-        }
-    } else if (config.mode == CUSTOM) {
-        FastLED.show();
-    }
-}
-
-ADC_MODE(ADC_VCC);
-void preinit() {
-    ESP8266WiFiClass::preinitWiFiOff();
-}
-
-// TODO 改造命令返回值
-void registerCommands() {
-    commandHandler.setDefaultHandler([](const Sender &sender, int argc, char *argv[]) {
-        sender.send("Unknown command. type 'help' for helps.");
-    });
-    commandHandler.registerCommand("help", "Show command helps", [](const Sender &sender, int argc, char *argv[]) {
-        commandHandler.printHelp(sender);
-    });
-    commandHandler.registerCommand("restart", "Restart system", [](const Sender &sender, int argc, char *argv[]) {
-        ESP.restart();
-    });
-    commandHandler.registerCommand("sysinfo", "Show system infomation", [](const Sender &sender, int argc, char *argv[]) {
-        sender.send("请在串口查看!");
-        showSystemInfo();
-    });
-    commandHandler.registerCommand("name", "Get/set device name", [](const Sender &sender, int argc, char *argv[]) {
-        if (argc >= 1) {
-            config.name = argv[0];
-            if (argc >= 2) {
-                config.hostname = argv[1];
-            }
-            markDirty();
-        } else {
-            String str = String("name ") + config.name + ' ' + config.hostname;
-            sender.send(str.c_str());
-        }
-    });
-    commandHandler.registerCommand("scan", "Scan wifi", [](const Sender &sender, int argc, char *argv[]) {
-        String result = scanWifi();
-        sender.send(result.c_str());
-    });
-    commandHandler.registerCommand("connect", "Connect to wifi", [](const Sender &sender, int argc, char *argv[]) {
-        // FIXME 无密码怎么设置静态IP以及SSID有空格咋办
-        // FIXME wifi连接失败后不会连回去
-        if (argc >= 1) {
-            String ssid(argv[0]);
-            String password(argc >= 2 ? argv[1] : "");
-            if (argc >= 5) {
-                config.ip.fromString(argv[2]);
-                config.gateway.fromString(argv[3]);
-                config.netmask.fromString(argv[4]);
-            }
-            if (connectWifi(ssid, password)) {
-                sender.send(WiFi.SSID().c_str());
-                sender.send(WiFi.localIP().toString().c_str());
-                WiFi.mode(WIFI_STA);
-                SSDP.begin();
-                config.ssid = ssid;
-                config.password = password;
-                markDirty();
-            } else {
-                config.ip = IPAddress();
-                config.gateway = IPAddress();
-                config.netmask = IPAddress();
-                sender.send("连接失败!");
-            }
-        }
-    });
-    commandHandler.registerCommand("disconnect", "Disconnect from wifi", [](const Sender &sender, int argc, char *argv[]) {
-        openHotspot();
-        sender.send(WiFi.softAPSSID().c_str());
-        sender.send(WiFi.softAPIP().toString().c_str());
-        WiFi.mode(WIFI_AP);
-        config.ssid = "";
-        config.password = "";
-        config.ip = IPAddress();
-        config.gateway = IPAddress();
-        config.netmask = IPAddress();
-        markDirty();
-    });
-    commandHandler.registerCommand("netinfo", "Show wifi infomation", [](const Sender &sender, int argc, char *argv[]) {
-        sender.send("请在串口查看!");
-        showWifiInfo();
-    });
-    commandHandler.registerCommand("mode", "Get/set light mode", [](const Sender &sender, int argc, char *argv[]) {
-        if (argc >= 1) {
-            LightType mode = str2mode(argv[0]);
-            setMode(mode);
-            switch (mode) {
-                case CONSTANT: {
-                    if (argc >= 2) {
-                        uint32_t color = str2hex(argv[1]);
-                        setConstant(color);
-                        break;
-                    }
-                    setConstant();
-                    break;
-                }
-                case BLINK: {
-                    if (argc >= 2) {
-                        uint32_t color = str2hex(argv[1]);
-                        if (argc >= 3) {
-                            float lastTime = atof(argv[2]);
-                            if (argc >= 4) {
-                                float interval = atof(argv[3]);
-                                setBlink(color, lastTime, interval);
-                                break;
-                            }
-                            setBlink(color, lastTime);
-                            break;
-                        }
-                        setBlink(color);
-                        break;
-                    }
-                    setBlink();
-                    break;
-                }
-                case BREATH: {
-                    if (argc >= 2) {
-                        uint32_t color = str2hex(argv[1]);
-                        if (argc >= 3) {
-                            float lastTime = atof(argv[2]);
-                            if (argc >= 4) {
-                                float interval = atof(argv[3]);
-                                setBreath(color, lastTime, interval);
-                                break;
-                            }
-                            setBreath(color, lastTime);
-                            break;
-                        }
-                        setBreath(color);
-                        break;
-                    }
-                    setBreath();
-                    break;
-                }
-                case CHASE: {
-                    if (argc >= 2) {
-                        uint32_t color = str2hex(argv[1]);
-                        if (argc >= 3) {
-                            float lastTime = atof(argv[2]);
-                            setChase(color, lastTime);
-                            break;
-                        }
-                        setChase(color);
-                        break;
-                    }
-                    setChase();
-                    break;
-                }
-                case RAINBOW: {
-                    if (argc >= 2) {
-                        int8_t delta = atoi(argv[1]);
-                        setRainbow(delta);
-                        break;
-                    }
-                    setRainbow();
-                    break;
-                }
-                case STREAM: {
-                    if (argc >= 2) {
-                        int8_t delta = atoi(argv[1]);
-                        setStream(delta);
-                        break;
-                    }
-                    setStream();
-                    break;
-                }
-                case ANIMATION: {
-                    // 开始读取动画
-                    break;
-                }
-                case MUSIC: {
-                    if (argc >= 2) {
-                        int8_t type = atoi(argv[1]);
-                        setMusic(type);
-                        break;
-                    }
-                    setMusic();
-                    break;
-                }
-                case CUSTOM: {
-                    light.custom.sender = nullptr;
-                    light.custom.index = 0;
-                    break;
-                }
-                default: {
-                    sender.send("Invaild mode");
-                    break;
-                }
-            }
-        } else {
-            String str = String("mode ") + LIGHT_TYPE_MAP[config.mode];
-            if (config.mode <= CHASE) {
-                str += ' ';
-                CRGB &currentColor = light.constant.currentColor;
-                uint32_t hex = rgb2hex(currentColor.r, currentColor.g, currentColor.b);
-                char color[8];
-                hex2str(hex, color);
-                str += color;
-            }
-            sender.send(str.c_str());
-        }
-    });
-    commandHandler.registerCommand("brightness", "Get/set brightness", [](const Sender &sender, int argc, char *argv[]) {
-        if (argc >= 1) {
-            int brightness = atoi(argv[0]);
-            if (brightness >= 0 && brightness <= 255) {
-                setBrightness((uint8_t) brightness);
-            } else {
-                sender.send("Invaild brightness");
-            }
-        } else {
-            String str = String("brightness ") + config.brightness;
-            sender.send(str.c_str());
-        }
-    });
-    commandHandler.registerCommand("temperature", "Get/set temperature", [](const Sender &sender, int argc, char *argv[]) {
-        if (argc >= 1) {
-            int temperature = atoi(argv[0]);
-            if (temperature >= 0) {
-                setTemperature((uint32_t) temperature);
-            } else {
-                sender.send("Invaild temperature");
-            }
-        } else {
-            String str = String("temperature ") + config.temperature + 'K';
-            sender.send(str.c_str());
-        }
-    });
-    commandHandler.registerCommand("fps", "Get/set refresh rate", [](const Sender &sender, int argc, char *argv[]) {
-        if (argc >= 1) {
-            int rate = atoi(argv[0]);
-            if (rate > 0 && rate <= 255) {
-                setRefreshRate((uint8_t) rate);
-            } else {
-                sender.send("Invaild refresh rate");
-            }
-        } else {
-            String str = String("fps ") + config.refreshRate;
-            sender.send(str.c_str());
-        }
-    });
-    commandHandler.registerCommand("info", "Show rgblight information", [](const Sender &sender, int argc, char *argv[]) {
-        StaticJsonDocument<1024> doc;
-        doc["name"] = config.name;
-        doc["id"] = ID;
-        doc["model"] = MODEL;
-        doc["version"] = VERSION;
-        doc["mode"] = LIGHT_TYPE_MAP[config.mode];
-        if (config.mode <= CHASE) {
-            CRGB &currentColor = light.constant.currentColor;
-            uint32_t hex = rgb2hex(currentColor.r, currentColor.g, currentColor.b);
-            char color[8];
-            hex2str(hex, color);
-            doc["color"] = color;
-        }
-        doc["brightness"] = config.brightness;
-        doc["temperature"] = config.temperature;
-        doc["fps"] = config.refreshRate;
-        String jsonStr;
-        serializeJson(doc, jsonStr);
-        sender.send(jsonStr.c_str());
-    });
-}
-
-void setup() {
-    registerCommands();
-
-    pinMode(POWER_LED_PIN, OUTPUT);
-    digitalWrite(POWER_LED_PIN, HIGH);
-    FastLED.addLeds<LED_TYPE, COLOR_LED_PIN, LED_COLOR_ORDER>(leds, LED_COUNT);
-#ifdef LED_CORRECTION
-    FastLED.setCorrection(CRGB(LED_CORRECTION));
 #endif
-    FastLED.clear(true);
-    delay(200);
-
-    clearBuffer(true);
-    Serial.begin(9600);
-    Serial.println();
-    Serial.println();
-#ifdef DEBUG_WC
-    Serial.setDebugOutput(true);
-    gdbstub_init();
-#endif
-
-    LittleFS.begin();
-    readSettings();
-    if (!LittleFS.exists("/config.json"))
-        saveSettings();
-    readLights();
-
-    FastLED.setBrightness(config.brightness);
-    FastLED.setTemperature(CRGB(kelvin2rgb(config.temperature)));
-    timer.attach_ms(1000 / config.refreshRate, updateLight);
-
-    if (connectWifi(config.ssid, config.password)) {
-        WiFi.mode(WIFI_STA);
-        Serial.println(WiFi.SSID());
-        Serial.println(WiFi.localIP());
-    } else {
-        openHotspot();
-        WiFi.mode(WIFI_AP);
-        Serial.println(WiFi.softAPSSID());
-        Serial.println(WiFi.softAPIP());
-    }
-
-    Serial.println(F("Start HTTP server."));
-    webServer.on("/" SSDP_XML, HTTP_GET, []() {
-        SSDP.schema(webServer.client());
-    });
-    webServer.serveStatic("/", LittleFS, "/www/", "max-age=300");
-    webServer.begin();
-    Serial.println(F("Start WebSocket server."));
-    wsServer.onEvent(webSocketHandler);
-    wsServer.begin();
-    Serial.println(F("Start mDNS."));
-    if (MDNS.begin(config.hostname)) {
-        MDNS.addService("http", "tcp", 80);
-        MDNS.addService("ws", "tcp", 81);
-        Serial.println(F("MDNS responder started."));
-    }
-    Serial.println(F("Start SSDP."));
-    SSDP.setDeviceType("upnp:rootdevice");
-    SSDP.setSchemaURL(SSDP_XML);
-    SSDP.setName(config.name);
-    SSDP.setSerialNumber(ID);
-    SSDP.setModelName(MODEL);
-    SSDP.setModelNumber(VERSION);
-    SSDP.setModelURL("https://github.com/DawningW/Microcontroller-Projects/tree/master/rgblight");
-    SSDP.setManufacturer("Wu Chen");
-    SSDP.setManufacturerURL("https://github.com/DawningW");
-    SSDP.setURL("index.html");
-    if (SSDP.begin()) {
-        Serial.println(F("SSDP started."));
-    }
-}
-
-void loop() {
-    if (config.isDirty && millis() - config.lastModifyTime > CONFIG_SAVE_PERIOD) {
-        saveSettings();
-    }
-    if (config.isLightDirty && millis() - config.lastModifyTime > CONFIG_SAVE_PERIOD) {
-        saveLights();
-    }
-    readSerial();
-    MDNS.update();
-    webServer.handleClient();
-    wsServer.loop();
-}

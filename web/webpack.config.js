@@ -68,7 +68,7 @@ module.exports = (env) => {
                     path.join(__dirname, "index.html"),
                     path.join(__dirname, "*.css")
                 ], { nodir: true }),
-                safelist: [/^picker/, /^slide/, /weui-btn_warn/]
+                safelist: [/^picker/, /^slide/, /weui-btn_warn/, /weui-icon-success-no-circle/, /weui-icon-warn/]
             }),
             new CompressionPlugin({
                 algorithm: "gzip",
@@ -136,7 +136,7 @@ module.exports = (env) => {
                             properties: {
                                 builtins: false, // FIXME 开了还能再小 1k, 但是跑不起来
                                 keep_quoted: true,
-                                reserved: [],
+                                reserved: ["$dialog", "$toast", "$info"],
                                 undeclared: true
                             },
                             module: true,

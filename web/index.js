@@ -45,6 +45,67 @@ document.getElementById("console-close").onclick = function() {
     document.getElementById("console").style.display = "none";
 }
 
+// popups (dialog, toast, info bar)
+window.$dialog = function(title, content, onPrimaryClick, onDefaultClick) {
+    let dialog = document.getElementById("dialog");
+    dialog.getElementsByClassName("weui-dialog__title")[0].innerText = title;
+    dialog.getElementsByClassName("weui-dialog__bd")[0].innerHTML = content;
+    let defaultBtn = dialog.getElementsByClassName("weui-dialog__btn_default")[0];
+    let primaryBtn = dialog.getElementsByClassName("weui-dialog__btn_primary")[0];
+    if (onPrimaryClick) {
+        defaultBtn.innerText = "取消";
+        primaryBtn.style.display = "block";
+        primaryBtn.onclick = function() {
+            dialog.style.display = "none";
+            onPrimaryClick();
+        }
+    } else {
+        defaultBtn.innerText = "关闭";
+        primaryBtn.style.display = "none";
+        primaryBtn.onclick = null;
+    }
+    defaultBtn.onclick = function() {
+        dialog.style.display = "none";
+        if (onDefaultClick) onDefaultClick();
+    }
+    dialog.style.display = "block";
+}
+
+window.$toast = function(status, message, duration) {
+    let toast = document.getElementById("toast");
+    let icon = toast.getElementsByTagName("i")[0];
+    icon.classList.value = "weui-icon_toast";
+    if (status == "success") {
+        icon.classList.add("weui-icon-success-no-circle");
+    } else if (status == "fail") {
+        icon.classList.add("weui-icon-warn");
+    }
+    toast.getElementsByClassName("weui-toast__content")[0].innerText = message;
+    toast.style.display = "block";
+    setTimeout(function() {
+        toast.style.display = "none";
+    }, duration || 2000);
+}
+
+window.$info = function(level, message, closeable) {
+    let info = document.getElementById("infobar");
+    info.classList.value = "weui-information-bar";
+    if (level == "error") {
+        info.classList.add("weui-information-bar_warn-strong");
+    } else if (level == "warning") {
+        info.classList.add("weui-information-bar_tips-strong");
+    } else if (level == "info") {
+        info.classList.add("weui-information-bar_tips-weak");
+    }
+    info.getElementsByClassName("weui-information-bar__bd")[0].innerText = message;
+    let close = info.getElementsByClassName("weui-btn_icon")[0];
+    close.style.display = closeable ? "block" : "none";
+    close.onclick = closeable ? function() {
+        info.style.display = "none";
+    } : null;
+    info.style.display = "flex";
+}
+
 // tab bar
 for (let element of document.getElementsByClassName("weui-tabbar__item")) {
     element.onclick = function() {
@@ -283,35 +344,102 @@ document.getElementById("refresh").onclick = function() {
 }
 
 // settings
+document.getElementById("connect").onclick = function() {
+    document.getElementById("wifi").style.display = "block";
+    document.getElementById("wifi-list").innerHTML = "正在搜索中...";
+    let listener = (msg) => {
+        document.getElementById("wifi-list").innerHTML = ""
+        let data = JSON.parse(msg.data);
+        for (let wifi of data) {
+            let item = document.createElement("a");
+            item.classList.add("weui-cell", "weui-cell_access");
+            let bd = document.createElement("span");
+            bd.classList.add("weui-cell__bd");
+            bd.innerText = wifi["ssid"];
+            item.appendChild(bd);
+            let ft = document.createElement("span");
+            ft.classList.add("weui-cell__ft");
+            ft.innerText = wifi["rssi"];
+            item.appendChild(ft);
+            item.onclick = function() {
+                $dialog("连接至 " + wifi["ssid"], `
+                    <input class="weui-input" type="password" placeholder="密码">
+                `, function() {
+                    let input = document.getElementById("dialog").getElementsByClassName("weui-input")[0];
+                    cconsole.execute("connect," + wifi["ssid"] + "," + input.value);
+                    $toast("success", "已连接");
+                    refreshConfig();
+                });
+            }
+            document.getElementById("wifi-list").appendChild(item);
+        }
+        ws.removeEventListener("message", listener);
+    };
+    ws.addEventListener("message", listener);
+    cconsole.execute("scan");
+}
 
+document.getElementById("wifi-close").onclick = function() {
+    document.getElementById("wifi").style.display = "none";
+}
+
+document.getElementById("disconnect").onclick = function() {
+    $dialog("断开连接", "确定要断开与此 WiFi 的连接吗?", function() {
+        cconsole.execute("disconnect");
+        $toast("fail", "已断开连接");
+        refreshConfig();
+    });
+}
+
+document.getElementById("change-name").onclick = function() {
+    let name = document.getElementById("name").innerText;
+    $dialog("修改设备名称", `
+        <input class="weui-input" type="text" placeholder="设备名称" value="${name}">
+    `, function() {
+        let input = document.getElementById("dialog").getElementsByClassName("weui-input")[0];
+        if (input.value == "") {
+            $toast("fail", "设备名称无效");
+            return;
+        }
+        cconsole.execute("name," + input.value);
+        $toast("success", "已修改");
+        refreshConfig();
+    });
+}
+
+document.getElementById("change-hostname").onclick = function() {
+    let hostname = document.getElementById("hostname").innerText;
+    $dialog("修改访问地址", `
+        <input class="weui-input" type="text" placeholder="主机名" value="${hostname}">
+        <p>修改后需重启设备生效, 可通过 <span id="url"></span> 访问此页面</p> 
+    `, function() {
+        let input = document.getElementById("dialog").getElementsByClassName("weui-input")[0];
+        if (input.value == "") {
+            $toast("fail", "主机名无效");
+            return;
+        }
+        cconsole.execute("name," + document.getElementById("name").innerText + "," + input.value);
+        $toast("success", "已修改");
+        refreshConfig();
+    });
+    let setUrl = (url) => document.getElementById("url").innerText = `http://${url}/ 或 http://${url}.local/`;
+    document.getElementById("dialog").getElementsByClassName("weui-input")[0].oninput = function() {
+        setUrl(this.value);
+    }
+    setUrl(hostname);
+}
+
+document.getElementById("upgrade").onclick = function() {
+    $toast("fail", "在线升级功能尚未实现");
+}
 
 // load
-window.onload = function() {
-    const setQrcode = (data) => document.getElementById("qrcode").src = QRCode.generatePNG(data, {
-        modulesize: 10,
-        margin: 2.5
-    });
+const setQrcode = (data) => document.getElementById("qrcode").src = QRCode.generatePNG(data, {
+    modulesize: 10,
+    margin: 2.5
+});
 
-    ws.addEventListener("open", () => {
-        let date = new Date().toLocaleString();
-        cconsole.print("已于 " + date + " 成功与 " + ws.url + " 建立连接!");
-    });
-    ws.addEventListener("error", (error) => {
-        cconsole.print("错误: " + error.message);
-    });
-    ws.addEventListener("message", (msg) => {
-        cconsole.print("接收: " + msg.data);
-    });
-    ws.reconnect();
-
-    fetch("/version").then((response) => {
-        if (!response.ok) return;
-        response.json().then((version) => {
-            document.getElementById("model").innerText = version["model"];
-            document.getElementById("version").innerText = version["version"];
-            document.getElementById("sdkversion").innerText = version["sdkVersion"];
-        });
-    });
+function refreshConfig() {
     fetch("/config").then((response) => {
         if (!response.ok) return;
         response.json().then(config => {
@@ -344,6 +472,32 @@ window.onload = function() {
             document.getElementById("animName").value = config["animName"] || "";
         });
     });
+}
+
+window.onload = function() {
+    ws.addEventListener("open", () => {
+        let date = new Date().toLocaleString();
+        cconsole.print("已于 " + date + " 成功与 " + ws.url + " 建立连接!");
+        document.getElementById("infobar").style.display = "none";
+    });
+    ws.addEventListener("error", (error) => {
+        cconsole.print("错误: " + error.message);
+        $info("error", "无法连接至小彩灯, 请检查设备状态!", true);
+    });
+    ws.addEventListener("message", (msg) => {
+        cconsole.print("接收: " + msg.data);
+    });
+    ws.reconnect();
+
+    fetch("/version").then((response) => {
+        if (!response.ok) return;
+        response.json().then((version) => {
+            document.getElementById("model").innerText = version["model"];
+            document.getElementById("version").innerText = version["version"];
+            document.getElementById("sdkversion").innerText = version["sdkVersion"];
+        });
+    });
+    refreshConfig();
 
     setQrcode(window.location.href);
 }

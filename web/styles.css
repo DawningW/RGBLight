@@ -114,6 +114,10 @@ html, body, #main {
     box-sizing: border-box;
 }
 
+.weui-half-screen-dialog {
+    z-index: 1000 !important;
+}
+
 #tip {
     display: none;
 }

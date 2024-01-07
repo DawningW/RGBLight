@@ -20,7 +20,7 @@
 // LED 灯颜色校正(可选), 详见 FastLED 文档
 // #define LED_CORRECTION 0xFFFFFF
 // LED 灯功率限制(可选), 详见 FastLED 文档
-#define LED_MAX_POWER_MW 1500
+#define LED_MAX_POWER_MW 2500
 // LED 灯形态, 详见 Light.hpp
 #define LIGHT_TYPE LightStrip<30, false>
 // #define LIGHT_TYPE LightDisc<CLOCKWISE | OUTSIDE_IN, 12, 6, 3>

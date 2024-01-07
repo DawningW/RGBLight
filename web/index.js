@@ -6,7 +6,7 @@ import "flexi-color-picker";
 import ReconnectingWebSocket from "reconnecting-websocket";
 import CConsole from "./cconsole.js";
 import { startRecord, stopRecord } from "./audiohelper.js";
-import { rgb2hex } from "./utils.js";
+import { rgb2hex, bytes2str } from "./utils.js";
 
 const DEV_MODE = process.env.NODE_ENV !== "production";
 // 需与 enum EffectType 保持一致
@@ -75,16 +75,22 @@ window.$toast = function(status, message, duration) {
     let toast = document.getElementById("toast");
     let icon = toast.getElementsByTagName("i")[0];
     icon.classList.value = "weui-icon_toast";
+    icon.innerHTML = "";
     if (status == "success") {
         icon.classList.add("weui-icon-success-no-circle");
     } else if (status == "fail") {
         icon.classList.add("weui-icon-warn");
+    } else if (status == "loading") {
+        icon.classList.add("weui-primary-loading");
+        icon.innerHTML = '<span class="weui-primary-loading__dot"></span>';
     }
     toast.getElementsByClassName("weui-toast__content")[0].innerText = message;
     toast.style.display = "block";
-    setTimeout(function() {
-        toast.style.display = "none";
-    }, duration || 2000);
+    if (duration != -1) {
+        setTimeout(function() {
+            toast.style.display = "none";
+        }, duration || 2000);
+    }
 }
 
 window.$info = function(level, message, closeable) {
@@ -117,7 +123,7 @@ for (let element of document.getElementsByClassName("weui-tabbar__item")) {
         this.classList.add("weui-bar__item_on");
         document.getElementById(this.id.replace("tab", "panel")).style.display = "block";
         if (this.id == "tab2") {
-            refreshFileList();
+            refreshFileList(true);
         }
     }
 }
@@ -256,7 +262,7 @@ document.getElementById("lastTime").onchange =
 // file manager
 const viewPath = ["/"];
 
-function refreshFileList() {
+function refreshFileList(refreshSpace = false) {
     fetch("/list?path=" + viewPath.join("")).then((response) => {
         if (!response.ok) return;
         response.json().then((files) => {
@@ -304,7 +310,7 @@ function refreshFileList() {
                     del.onclick = function() {
                         fetch("/delete?path=" + viewPath.join("") + file["name"]).then((response) => {
                             if (!response.ok) return;
-                            refreshFileList();
+                            refreshFileList(true);
                         });
                     }
                     ft.appendChild(del);
@@ -314,6 +320,16 @@ function refreshFileList() {
             }
         });
     });
+    if (refreshSpace) {
+        fetch("/status").then((response) => {
+            if (!response.ok) return;
+            response.json().then((status) => {
+                let total = Math.floor(status["fsTotalSpace"] / 1024);
+                let used = Math.floor(status["fsUsedSpace"] / 1024);
+                document.getElementById("space").innerText = `${used}K/${total}K`;
+            });
+        });
+    }
 }
 
 function uploadFile(path, file) {
@@ -331,7 +347,7 @@ document.getElementById("upload").onclick = function() {
     input.onchange = function() {
         uploadFile(viewPath.join(""), input.files[0]).then((response) => {
             if (!response.ok) return;
-            refreshFileList();
+            refreshFileList(true);
         }).finally(() => {
             input.remove();
         });
@@ -430,7 +446,67 @@ document.getElementById("change-hostname").onclick = function() {
 }
 
 document.getElementById("upgrade").onclick = function() {
-    $toast("fail", "在线升级功能尚未实现");
+    let input = document.createElement("input");
+    input.type = "file";
+    input.onchange = async function() {
+        $toast("loading", "正在升级", -1);
+        try {
+            let upgrade_pack = input.files[0];
+            let buffer = await upgrade_pack.arrayBuffer();
+            let data = new Uint8Array(buffer);
+            let view = new DataView(buffer);
+            let offset = 0;
+            // header
+            let magic = bytes2str(data.subarray(0, 4));
+            if (magic != "UPKG") {
+                throw new Error("无效的升级包");
+            }
+            let version = view.getUint32(4, true);
+            if (version <= window.version["versionCode"]) {
+                throw new Error("该升级包比当前版本旧, 无法安装");
+            }
+            let file_count = view.getUint32(8, true);
+            let crc32 = view.getUint32(12, true);
+            offset += 16;
+            // item
+            for (let i = 0; i < file_count; i++) {
+                let magic = view.getUint8(offset++);
+                if (magic != 0xAA) {
+                    throw new Error("无效的资源文件");
+                }
+                let operation = view.getUint8(offset++);
+                let end_index = data.indexOf(0x00, offset);
+                let file_pathname = bytes2str(data.subarray(offset, end_index));
+                offset = end_index + 1;
+                let file_size = view.getUint32(offset, true);
+                offset += 4;
+                let file_content = data.subarray(offset, offset + file_size);
+                offset += file_size;
+                // upload res
+                let file_path = file_pathname.substr(0, file_pathname.lastIndexOf("/"));
+                let file_name = file_pathname.substr(file_pathname.lastIndexOf("/") + 1);
+                let file = new File([file_content], file_name);
+                let res = await uploadFile(file_path, file);
+                if (await res.text() != "OK") {
+                    throw new Error("资源文件上传失败");
+                }
+            }
+            // upgrade
+            let res = await fetch("/upgrade?path=/RGBLight.bin");
+            if (await res.text() != "OK") {
+                throw new Error("升级失败");
+            }
+        } catch (err) {
+            $toast("fail", err.message);
+            return;
+        }
+        // reload
+        $toast("success", "升级成功");
+        setTimeout(function() {
+            window.location.reload();
+        }, 2000);
+    }
+    input.click();
 }
 
 // load
@@ -492,6 +568,7 @@ window.onload = function() {
     fetch("/version").then((response) => {
         if (!response.ok) return;
         response.json().then((version) => {
+            window.version = version;
             document.getElementById("model").innerText = version["model"];
             document.getElementById("version").innerText = version["version"];
             document.getElementById("sdkversion").innerText = version["sdkVersion"];

@@ -504,7 +504,7 @@ void setup() {
             webServer.send(200, MIME_TYPE(json), msg);
         }, "config");
     });
-    static std::function<bool(String&)> checkPath = [](String &path) {
+    static auto checkPath = [](const String &path) {
         if (path.isEmpty()) {
             webServer.send(400, MIME_TYPE(txt), PSTR("Bad request"));
             return false;
@@ -549,12 +549,7 @@ void setup() {
         static File uploadFile;
         HTTPUpload &upload = webServer.upload();
         if (upload.status == UPLOAD_FILE_START) {
-            String path = webServer.arg("path");
-            if (path.isEmpty()) {
-                webServer.send(400, MIME_TYPE(txt), PSTR("Bad request"));
-                return;
-            }
-            path = path + "/" + upload.filename;
+            String path = webServer.arg("path") + "/" + upload.filename;
             uploadFile = LittleFS.open(path, "w");
             if (!uploadFile) {
                 webServer.send(500, MIME_TYPE(txt), PSTR("Internal server error"));
@@ -575,6 +570,7 @@ void setup() {
             }
             Serial.printf_P(PSTR("Upload finished, size: %u\n"), upload.totalSize);
         }
+        yield();
     });
     webServer.on("/delete", HTTP_GET, []() {
         String path = webServer.arg("path");
@@ -593,27 +589,31 @@ void setup() {
             return;
         }
         bool success = false;
-        uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
-        if (Update.begin(maxSketchSpace)) { // Update 能升级文件系统, 但为了避免刷掉用户的动画文件, 我决定不用
-            Serial.println(F("Start to update"));
-            File file = LittleFS.open(path, "r");
-            if (file) {
+        File file = LittleFS.open(path, "r");
+        if (file) {
+            if (Update.begin(file.size())) { // Update 能升级文件系统, 但为了避免刷掉用户的动画文件, 我决定不用
+                Serial.println(F("Start to update"));
                 uint32_t writtenSize = Update.writeStream(file);
-                if (writtenSize == file.size() && Update.end(true)) {
+                if (Update.end(true)) {
                     Serial.printf_P(PSTR("Update success, size: %u\n"), writtenSize);
                     success = true;
                 } else {
                     Update.printError(Serial);
                 }
-                file.close();
             } else {
-                Serial.println(F("Open OTA file failed"));
+                Update.printError(Serial);
             }
+            file.close();
         } else {
-            Update.printError(Serial);
+            Serial.println(F("Open OTA file failed"));
         }
         if (success) {
+            LittleFS.remove(path);
+            webServer.sendHeader("Connection", "close");
             webServer.send(200, MIME_TYPE(txt), PSTR("OK"));
+            delay(2000);
+            Serial.println(F("Rebooting..."));
+            ESP.restart();
         } else {
             webServer.send(500, MIME_TYPE(txt), PSTR("Internal server error"));
         }

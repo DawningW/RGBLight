@@ -550,26 +550,28 @@ public:
 
 template <typename LIGHT>
 Effect* Effect::readFromJSON(JsonDocument &json) {
-    EffectType mode = json["mode"].as<EffectType>();
-    switch (mode) {
-        case CONSTANT:
-            return ConstantEffect<LIGHT>::readFromJSON(json);
-        case BLINK:
-            return BlinkEffect<LIGHT>::readFromJSON(json);
-        case BREATH:
-            return BreathEffect<LIGHT>::readFromJSON(json);
-        case CHASE:
-            return ChaseEffect<LIGHT>::readFromJSON(json);
-        case RAINBOW:
-            return RainbowEffect<LIGHT>::readFromJSON(json);
-        case STREAM:
-            return StreamEffect<LIGHT>::readFromJSON(json);
-        case ANIMATION:
-            return AnimationEffect<LIGHT>::readFromJSON(json);
-        case MUSIC:
-            return MusicEffect<LIGHT>::readFromJSON(json);
-        case CUSTOM:
-            return CustomEffect<LIGHT>::readFromJSON(json);
+    if (json.containsKey("mode")) {
+        EffectType mode = json["mode"].as<EffectType>();
+        switch (mode) {
+            case CONSTANT:
+                return ConstantEffect<LIGHT>::readFromJSON(json);
+            case BLINK:
+                return BlinkEffect<LIGHT>::readFromJSON(json);
+            case BREATH:
+                return BreathEffect<LIGHT>::readFromJSON(json);
+            case CHASE:
+                return ChaseEffect<LIGHT>::readFromJSON(json);
+            case RAINBOW:
+                return RainbowEffect<LIGHT>::readFromJSON(json);
+            case STREAM:
+                return StreamEffect<LIGHT>::readFromJSON(json);
+            case ANIMATION:
+                return AnimationEffect<LIGHT>::readFromJSON(json);
+            case MUSIC:
+                return MusicEffect<LIGHT>::readFromJSON(json);
+            case CUSTOM:
+                return CustomEffect<LIGHT>::readFromJSON(json);
+        }
     }
     return new ConstantEffect<LIGHT>(DEFAULT_COLOR); // 默认为常亮
 }

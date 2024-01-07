@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # coding=utf-8
 
+from enum import Enum, IntEnum
 import sys
 import os
-from enum import Enum, IntEnum
+import re
 import struct
 import shutil
 import binascii
@@ -51,6 +52,20 @@ if __name__ == "__main__":
         print("未找到编译后的 bin 文件, 请先编译项目或将 bin_path 变量改为编译输出目录")
         exit(1)
 
+    # 从 config.h 中获取版本号
+    version = 0
+    with open("./config.h", "r", encoding="utf-8") as file:
+        while True:
+            line = file.readline()
+            if not line:
+                break
+            line = line.strip()
+            match = re.search(r"^#define\s+VERSION_CODE\s+(\d+)\s*(?://.*|/\*.*)?$", line)
+            if match:
+                version = int(match.group(1))
+                break
+    print(f"当前版本号: {version}")
+
     upgrade_pack_path = os.path.join(output_path, upgrade_pack_name)
     with open(upgrade_pack_path, "wb") as file:
         file_count = 0
@@ -80,6 +95,6 @@ if __name__ == "__main__":
                     file_count += 1
 
         file.seek(0)
-        header = UpgradePackHeader(1, file_count)
+        header = UpgradePackHeader(version, file_count)
         file.write(header.pack())
         print(f"升级包 {upgrade_pack_path} 打包完成, 文件数量: {file_count}")

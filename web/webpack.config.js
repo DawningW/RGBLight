@@ -68,7 +68,7 @@ module.exports = (env) => {
                     path.join(__dirname, "index.html"),
                     path.join(__dirname, "*.css")
                 ], { nodir: true }),
-                safelist: [/^picker/, /^slide/, /weui-btn_warn/, /weui-icon-success-no-circle/, /weui-icon-warn/]
+                safelist: [/^picker/, /^slide/, /weui-btn_warn/, /weui-icon-success-no-circle/, /weui-icon-warn/, /weui-primary-loading/, /weui-primary-loading__dot/]
             }),
             new CompressionPlugin({
                 algorithm: "gzip",

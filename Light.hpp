@@ -7,38 +7,37 @@
 #include "config.h"
 #include "utils.h"
 
-class Light {
-public:
-    virtual CRGB *data() = 0;
-    virtual int count() = 0;
-};
+// ==================== LightStrip ====================
 
 template <int COUNT, bool REVERSE>
-class LightStrip : public Light {
+class LightStrip {
+public:
+    static constexpr int count() {
+        return COUNT;
+    }
+
 private:
-    CRGB leds[COUNT];
+    CRGB leds[count()];
+public:
+    CRGB* data() {
+        return this->leds;
+    }
 
 public:
-    CRGB *data() override {
-        return leds;
-    }
-
-    int count() override {
+    constexpr int l() const {
         return COUNT;
     }
 
-    int l() {
-        return COUNT;
-    }
-
-    CRGB &at(int i) {
+    CRGB& at(int i) {
         if (REVERSE) {
-            return leds[l() - i - 1];
+            return this->leds[l() - i - 1];
         } else {
-            return leds[i];
+            return this->leds[i];
         }
     }
 };
+
+// ==================== LightPanel ====================
 
 enum LightPanelArrangement {
     Z_WORD     = 0x0, // Z 字形
@@ -50,28 +49,29 @@ enum LightPanelArrangement {
 };
 
 template <int X_COUNT, int Y_COUNT, int ARRANGEMENT>
-class LightPanel : public Light {
-private:
-    CRGB leds[X_COUNT * Y_COUNT];
-
+class LightPanel {
 public:
-    CRGB *data() override {
-        return leds;
-    }
-
-    int count() override {
+    static constexpr int count() {
         return X_COUNT * Y_COUNT;
     }
 
-    int w() {
+private:
+    CRGB leds[count()];
+public:
+    CRGB* data() {
+        return this->leds;
+    }
+
+public:
+    constexpr int w() const {
         return X_COUNT;
     }
 
-    int h() {
+    constexpr int h() const {
         return Y_COUNT;
     }
 
-    CRGB &at(int x, int y) {
+    CRGB& at(int x, int y) {
         int _w = w();
         int _h = h();
         if (ARRANGEMENT & VERTICAL) {
@@ -89,9 +89,11 @@ public:
         if (ARRANGEMENT & FLIP) {
             y = _h - y - 1;
         }
-        return leds[y * _w + x];
+        return this->leds[y * _w + x];
     }
 };
+
+// ==================== LightDisc ====================
 
 enum LightDiscArrangement {
     CLOCKWISE     = 0x0, // 顺时针
@@ -101,71 +103,78 @@ enum LightDiscArrangement {
 };
 
 template <int ARRANGEMENT, int... COUNT_PER_RING>
-class LightDisc : public Light {
+class LightDisc {
 private:
-    static constexpr int led_ring_count = sizeof...(COUNT_PER_RING);
-    static constexpr int led_rings[led_ring_count] = {COUNT_PER_RING...};
-    static constexpr int led_count = sum(led_rings, led_rings + led_ring_count, 0);
-    const int rings[led_ring_count] = {COUNT_PER_RING...};
-    CRGB leds[led_count];
+    static constexpr int ring_count() {
+        return sizeof...(COUNT_PER_RING);
+    }
+    static constexpr int rings[ring_count()] = {COUNT_PER_RING...};
 
 public:
-    CRGB *data() override {
-        return leds;
+    static constexpr int count() {
+        return sum(rings, rings + ring_count(), 0);
     }
 
-    int count() override {
-        return led_count;
+private:
+    CRGB leds[count()];
+public:
+    CRGB* data() {
+        return this->leds;
     }
 
-    int r() {
-        return led_ring_count;
+public:
+    constexpr int r() const {
+        return ring_count();
     }
 
-    int l(int ring) {
+    constexpr int l(int ring) const {
         return rings[ring];
     }
 
-    CRGB &at(int ring, int i) {
+    CRGB& at(int ring, int i) {
         if (ARRANGEMENT & ANTICLOCKWISE) {
             i = l(ring) - i - 1;
         }
         if (ARRANGEMENT & INSIDE_OUT) {
-            return leds[sum(rings + ring + 1, rings + r(), i)];
+            return this->leds[sum(rings + ring + 1, rings + r(), 0) + i];
         } else {
-            return leds[sum(rings, rings + ring, i)];
+            return this->leds[sum(rings, rings + ring, 0) + i];
         }
     }
 };
 
+template <int ARRANGEMENT, int... COUNT_PER_RING>
+constexpr int LightDisc<ARRANGEMENT, COUNT_PER_RING...>::rings[];
+
+// ==================== LightCube ====================
+
 template <int X_COUNT, int Y_COUNT, int Z_COUNT>
-class LightCube : public Light {
-private:
-    CRGB leds[X_COUNT * Y_COUNT * Z_COUNT];
-
+class LightCube {
 public:
-    CRGB *data() override {
-        return leds;
-    }
-
-    int count() override {
+    static constexpr int count() {
         return X_COUNT * Y_COUNT * Z_COUNT;
     }
 
-    int l() {
+private:
+    CRGB leds[count()];
+public:
+    CRGB* data() { return this->leds; }
+
+public:
+    constexpr int l() const {
         return X_COUNT;
     }
 
-    int w() {
+    constexpr int w() const {
         return Y_COUNT;
     }
 
-    int h() {
+    constexpr int h() const {
         return Z_COUNT;
     }
 
-    CRGB &at(int x, int y, int z) {
-        return leds[z * l() * w() + y * l() + x];
+    CRGB& at(int x, int y, int z) {
+        return this->leds[z * l() * w() + y * l() + x];
     }
 };
 

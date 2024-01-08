@@ -5,8 +5,10 @@
 #include <LittleFS.h>
 #include <FastLED.h>
 #include <ArduinoJson.h>
+#include <functional>
 
 #include "Light.hpp"
+#include "any.h"
 #include "utils.h"
 
 enum EffectType {
@@ -40,17 +42,59 @@ const char* effect2str(EffectType effect);
 
 extern const uint16_t &fps;
 
+template <typename Light>
 class Effect {
+private:
+    std::any _impl;
+    std::function<EffectType()> _type;
+    std::function<bool(Light &, uint32_t)> _update;
+    std::function<void(JsonDocument &)> _writeToJSON;
+
 public:
-    virtual EffectType type() = 0;
-    virtual bool update(Light &light, uint32_t deltaTime) = 0;
-    virtual void writeToJSON(JsonDocument &json) { json["mode"] = type(); };
-    template <typename LIGHT>
-    static Effect* readFromJSON(JsonDocument &json);
+    Effect() noexcept {}
+
+    template <typename T>
+    Effect(T &&impl) : _impl(std::forward<T>(impl)) {
+        _type = [this]() -> EffectType {
+            return std::any_cast<T&>(_impl).type();
+        };
+        _update = [this](Light &light, uint32_t deltaTime) -> bool {
+            return std::any_cast<T&>(_impl).update(light, deltaTime);
+        };
+        _writeToJSON = [this](JsonDocument &json) {
+            std::any_cast<T&>(_impl).writeToJSON(json);
+        };
+    }
+
+    template <typename T>
+    Effect<Light>& operator=(T &&impl) {
+        ::new(this) Effect<Light>(std::forward<T>(impl));
+        return *this;
+    }
+
+    template <typename T>
+    T& as() {
+        return std::any_cast<T&>(_impl);
+    }
+
+    EffectType type() const {
+        return _type();
+    }
+
+    bool update(Light &light, uint32_t deltaTime) {
+        return _update(light, deltaTime);
+    }
+
+    void writeToJSON(JsonDocument &json) const {
+        json["mode"] = type();
+        _writeToJSON(json);
+    }
+
+    // defined at the end of the file
+    static Effect<Light> readFromJSON(JsonDocument &json);
 };
 
-template <typename LIGHT>
-class ConstantEffect : public Effect {
+class ConstantEffect {
 private:
     bool updated;
     CRGB currentColor;
@@ -59,11 +103,12 @@ public:
     ConstantEffect(uint32_t color) :
         updated(false), currentColor(color) {}
 
-    EffectType type() override {
+    EffectType type() const {
         return CONSTANT;
     }
 
-    bool update(Light &light, uint32_t deltaTime) override {
+    template <typename Light>
+    bool update(Light &light, uint32_t deltaTime) {
         if (!updated) {
             fill_solid(light.data(), light.count(), currentColor);
             updated = true;
@@ -72,19 +117,17 @@ public:
         return false;
     }
 
-    void writeToJSON(JsonDocument &json) override {
-        Effect::writeToJSON(json);
+    void writeToJSON(JsonDocument &json) const {
         json["color"] = rgb2hex(currentColor.r, currentColor.g, currentColor.b);
     }
 
-    static ConstantEffect* readFromJSON(JsonDocument &json) {
+    static ConstantEffect readFromJSON(JsonDocument &json) {
         uint32_t color = json["color"];
-        return new ConstantEffect(color);
+        return ConstantEffect(color);
     }
 };
 
-template <typename LIGHT>
-class BlinkEffect : public Effect {
+class BlinkEffect {
 private:
     uint16_t currentFrame;
     CRGB currentColor;
@@ -95,11 +138,12 @@ public:
     BlinkEffect(uint32_t color, float lastTime, float interval) :
         currentFrame(0), currentColor(color), lastTime(lastTime), interval(interval) {}
 
-    EffectType type() override {
+    EffectType type() const {
         return BLINK;
     }
 
-    bool update(Light &light, uint32_t deltaTime) override {
+    template <typename Light>
+    bool update(Light &light, uint32_t deltaTime) {
         int lastTime = fps * this->lastTime;
         int interval = fps * this->interval;
         bool needUpdate = false;
@@ -116,23 +160,21 @@ public:
         return needUpdate;
     }
 
-    void writeToJSON(JsonDocument &json) override {
-        Effect::writeToJSON(json);
+    void writeToJSON(JsonDocument &json) const {
         json["color"] = rgb2hex(currentColor.r, currentColor.g, currentColor.b);
         json["lastTime"] = lastTime;
         json["interval"] = interval;
     }
 
-    static BlinkEffect* readFromJSON(JsonDocument &json) {
+    static BlinkEffect readFromJSON(JsonDocument &json) {
         uint32_t color = json["color"];
         float lastTime = json["lastTime"];
         float interval = json["interval"];
-        return new BlinkEffect(color, lastTime, interval);
+        return BlinkEffect(color, lastTime, interval);
     }
 };
 
-template <typename LIGHT>
-class BreathEffect : public Effect {
+class BreathEffect {
 private:
     uint16_t currentFrame;
     CRGB currentColor;
@@ -143,11 +185,12 @@ public:
     BreathEffect(uint32_t color, float lastTime, float interval) :
         currentFrame(0), currentColor(color), lastTime(lastTime), interval(interval) {}
 
-    EffectType type() override {
+    EffectType type() const {
         return BREATH;
     }
 
-    bool update(Light &light, uint32_t deltaTime) override {
+    template <typename Light>
+    bool update(Light &light, uint32_t deltaTime) {
         int lastTime = fps * this->lastTime;
         int interval = fps * this->interval;
         bool needUpdate = false;
@@ -165,23 +208,21 @@ public:
         return needUpdate;
     }
 
-    void writeToJSON(JsonDocument &json) override {
-        Effect::writeToJSON(json);
+    void writeToJSON(JsonDocument &json) const {
         json["color"] = rgb2hex(currentColor.r, currentColor.g, currentColor.b);
         json["lastTime"] = lastTime;
         json["interval"] = interval;
     }
 
-    static BreathEffect* readFromJSON(JsonDocument &json) {
+    static BreathEffect readFromJSON(JsonDocument &json) {
         uint32_t color = json["color"];
         float lastTime = json["lastTime"];
         float interval = json["interval"];
-        return new BreathEffect(color, lastTime, interval);
+        return BreathEffect(color, lastTime, interval);
     }
 };
 
-template <typename LIGHT>
-class ChaseEffect : public Effect {
+class ChaseEffect {
 private:
     uint16_t currentFrame;
     CRGB currentColor;
@@ -192,12 +233,8 @@ public:
     ChaseEffect(uint32_t color, uint8_t direction, float lastTime) :
         currentFrame(0), currentColor(color), direction(direction), lastTime(lastTime) {}
 
-    EffectType type() override {
+    EffectType type() const {
         return CHASE;
-    }
-
-    bool update(Light &light, uint32_t deltaTime) override {
-        return update(static_cast<LIGHT&>(light), deltaTime);
     }
 
     template <int COUNT, bool REVERSE>
@@ -242,23 +279,21 @@ public:
         return needUpdate;
     }
 
-    void writeToJSON(JsonDocument &json) override {
-        Effect::writeToJSON(json);
+    void writeToJSON(JsonDocument &json) const {
         json["color"] = rgb2hex(currentColor.r, currentColor.g, currentColor.b);
         json["direction"] = direction;
         json["lastTime"] = lastTime;
     }
 
-    static ChaseEffect* readFromJSON(JsonDocument &json) {
+    static ChaseEffect readFromJSON(JsonDocument &json) {
         uint32_t color = json["color"];
         uint8_t direction = json["direction"];
         float lastTime = json["lastTime"];
-        return new ChaseEffect(color, direction, lastTime);
+        return ChaseEffect(color, direction, lastTime);
     }
 };
 
-template <typename LIGHT>
-class RainbowEffect : public Effect {
+class RainbowEffect {
 private:
     uint8_t currentHue;
     int8_t delta;
@@ -267,11 +302,12 @@ public:
     RainbowEffect(int8_t delta) :
         currentHue(0), delta(delta) {}
 
-    EffectType type() override {
+    EffectType type() const {
         return RAINBOW;
     }
 
-    bool update(Light &light, uint32_t deltaTime) override {
+    template <typename Light>
+    bool update(Light &light, uint32_t deltaTime) {
         CHSV hsv(currentHue, 255, 240);
         CRGB rgb;
         hsv2rgb_rainbow(hsv, rgb);
@@ -280,19 +316,17 @@ public:
         return true;
     }
 
-    void writeToJSON(JsonDocument &json) override {
-        Effect::writeToJSON(json);
+    void writeToJSON(JsonDocument &json) const {
         json["delta"] = delta;
     }
 
-    static RainbowEffect* readFromJSON(JsonDocument &json) {
+    static RainbowEffect readFromJSON(JsonDocument &json) {
         uint8_t delta = json["delta"];
-        return new RainbowEffect(delta);
+        return RainbowEffect(delta);
     }
 };
 
-template <typename LIGHT>
-class StreamEffect : public Effect {
+class StreamEffect {
 private:
     uint8_t currentHue;
     uint8_t direction;
@@ -302,12 +336,8 @@ public:
     StreamEffect(uint8_t direction, int8_t delta) :
         currentHue(0), direction(direction), delta(delta) {}
 
-    EffectType type() override {
+    EffectType type() const {
         return STREAM;
-    }
-
-    bool update(Light &light, uint32_t deltaTime) override {
-        return update(static_cast<LIGHT&>(light), deltaTime);
     }
 
     template <int COUNT, bool REVERSE>
@@ -330,21 +360,19 @@ public:
         return true;
     }
 
-    void writeToJSON(JsonDocument &json) override {
-        Effect::writeToJSON(json);
+    void writeToJSON(JsonDocument &json) const {
         json["direction"] = direction;
         json["delta"] = delta;
     }
 
-    static StreamEffect* readFromJSON(JsonDocument &json) {
+    static StreamEffect readFromJSON(JsonDocument &json) {
         uint8_t direction = json["direction"];
         uint8_t delta = json["delta"];
-        return new StreamEffect(direction, delta);
+        return StreamEffect(direction, delta);
     }
 };
 
-template <typename LIGHT>
-class AnimationEffect : public Effect {
+class AnimationEffect {
 private:
     String animName;
     File file;
@@ -375,11 +403,12 @@ public:
         }
     }
 
-    EffectType type() override {
+    EffectType type() const {
         return ANIMATION;
     }
 
-    bool update(Light &light, uint32_t deltaTime) override {
+    template <typename Light>
+    bool update(Light &light, uint32_t deltaTime) {
         if (!file) {
             return false;
         }
@@ -423,19 +452,17 @@ public:
         return true;
     }
 
-    void writeToJSON(JsonDocument &json) override {
-        Effect::writeToJSON(json);
+    void writeToJSON(JsonDocument &json) const {
         json["animName"] = animName;
     }
 
-    static AnimationEffect* readFromJSON(JsonDocument &json) {
+    static AnimationEffect readFromJSON(JsonDocument &json) {
         const char *animName = json["animName"];
-        return new AnimationEffect(animName);
+        return AnimationEffect(animName);
     }
 };
 
-template <typename LIGHT>
-class MusicEffect : public Effect {
+class MusicEffect {
 private:
     uint8_t soundMode; // 0-电平模式 1-频谱模式
     uint8_t currentHue;
@@ -449,12 +476,8 @@ public:
         currentVolume = volume;
     }
 
-    EffectType type() override {
+    EffectType type() const {
         return MUSIC;
-    }
-
-    bool update(Light &light, uint32_t deltaTime) override {
-        return update(static_cast<LIGHT&>(light), deltaTime);
     }
 
     template <int COUNT, bool REVERSE>
@@ -508,19 +531,17 @@ public:
         return true;
     }
 
-    void writeToJSON(JsonDocument &json) override {
-        Effect::writeToJSON(json);
+    void writeToJSON(JsonDocument &json) const {
         json["soundMode"] = soundMode;
     }
 
-    static MusicEffect* readFromJSON(JsonDocument &json) {
+    static MusicEffect readFromJSON(JsonDocument &json) {
         uint8_t soundMode = json["soundMode"];
-        return new MusicEffect(soundMode);
+        return MusicEffect(soundMode);
     }
 };
 
-template <typename LIGHT>
-class CustomEffect : public Effect {
+class CustomEffect {
 private:
     int index;
 
@@ -531,49 +552,49 @@ public:
         return index;
     }
 
-    EffectType type() override {
+    EffectType type() const {
         return CUSTOM;
     }
 
-    bool update(Light &light, uint32_t deltaTime) override {
+    template <typename Light>
+    bool update(Light &light, uint32_t deltaTime) {
         return true;
     }
 
-    void writeToJSON(JsonDocument &json) override {
-        Effect::writeToJSON(json);
+    void writeToJSON(JsonDocument &json) const {
     }
 
-    static CustomEffect* readFromJSON(JsonDocument &json) {
-        return new CustomEffect();
+    static CustomEffect readFromJSON(JsonDocument &json) {
+        return CustomEffect();
     }
 };
 
-template <typename LIGHT>
-Effect* Effect::readFromJSON(JsonDocument &json) {
+template <typename Light>
+Effect<Light> Effect<Light>::readFromJSON(JsonDocument &json) {
     if (json.containsKey("mode")) {
         EffectType mode = json["mode"].as<EffectType>();
         switch (mode) {
             case CONSTANT:
-                return ConstantEffect<LIGHT>::readFromJSON(json);
+                return ConstantEffect::readFromJSON(json);
             case BLINK:
-                return BlinkEffect<LIGHT>::readFromJSON(json);
+                return BlinkEffect::readFromJSON(json);
             case BREATH:
-                return BreathEffect<LIGHT>::readFromJSON(json);
+                return BreathEffect::readFromJSON(json);
             case CHASE:
-                return ChaseEffect<LIGHT>::readFromJSON(json);
+                return ChaseEffect::readFromJSON(json);
             case RAINBOW:
-                return RainbowEffect<LIGHT>::readFromJSON(json);
+                return RainbowEffect::readFromJSON(json);
             case STREAM:
-                return StreamEffect<LIGHT>::readFromJSON(json);
+                return StreamEffect::readFromJSON(json);
             case ANIMATION:
-                return AnimationEffect<LIGHT>::readFromJSON(json);
+                return AnimationEffect::readFromJSON(json);
             case MUSIC:
-                return MusicEffect<LIGHT>::readFromJSON(json);
+                return MusicEffect::readFromJSON(json);
             case CUSTOM:
-                return CustomEffect<LIGHT>::readFromJSON(json);
+                return CustomEffect::readFromJSON(json);
         }
     }
-    return new ConstantEffect<LIGHT>(DEFAULT_COLOR); // 默认为常亮
+    return ConstantEffect(DEFAULT_COLOR); // 默认为常亮
 }
 
 #endif // __LIGHTEFFECT_HPP__

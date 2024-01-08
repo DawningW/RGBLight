@@ -22,6 +22,7 @@
 #include <ArduinoJson.h>
 #define FASTLED_ESP8266_RAW_PIN_ORDER // 不需要转换
 #include <FastLED.h>
+#include <ArduinoHA.h>
 #ifdef ENABLE_DEBUG
 #include <GDBStub.h>
 #endif
@@ -47,6 +48,10 @@ Effect *lightEffect;
 DNSServer dnsServer;
 ESP8266WebServer webServer(80);
 WebSocketsServer wsServer(81);
+WiFiClient client;
+HADevice device;
+HAMqtt mqtt(client, device);
+HALight haLight(product_name, HALight::BrightnessFeature | HALight::ColorTemperatureFeature | HALight::RGBFeature);
 
 struct Config {
     time_t lastModifyTime;
@@ -126,6 +131,7 @@ void readSettings() {
     FastLED.setBrightness(config.brightness);
     FastLED.setTemperature(CRGB(kelvin2rgb(config.temperature)));
     timer.attach_ms(1000 / config.refreshRate, updateLight);
+    haLight.setName(config.name.c_str());
     
     if (shouldSave) {
         saveSettings();
@@ -463,6 +469,14 @@ void setup() {
     gdbstub_init(); // XXX 在 esp8266-arduino 3.0+ 上疑似会严重干扰 LED 时序
 #endif
 
+    byte mac[WL_MAC_ADDR_LENGTH];
+    WiFi.macAddress(mac);
+    device.setUniqueId(mac, sizeof(mac));
+    device.setName(product_name);
+    device.setModel(model_name);
+    device.setManufacturer("QingChenW");
+    device.setSoftwareVersion(version);
+
     LittleFS.begin();
     readSettings();
 
@@ -648,6 +662,10 @@ void setup() {
         }
     });
     wsServer.begin();
+#ifdef BROKER_ADDR
+    Serial.println(F("Start MQTT client"));
+    mqtt.begin(BROKER_ADDR);
+#endif
     Serial.println(F("Start mDNS"));
     if (MDNS.begin(config.hostname)) { // FIXME 电脑上的 chrome 无法主动发现设备, 但是 Android APP 能
         MDNS.addService("http", "tcp", 80);
@@ -680,6 +698,7 @@ void loop() {
     dnsServer.processNextRequest();
     webServer.handleClient();
     wsServer.loop();
+    mqtt.loop();
     MDNS.update();
 }
 

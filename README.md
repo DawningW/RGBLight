@@ -1,7 +1,7 @@
 # RGB Light
 # 炫酷 R! G! B! 灯
 
-基于 ESP8266 使用 Arduino 开发的物联网小彩灯, 支持多种形态多种光效, 配套自研网页/小程序/PC 客户端, ~~并支持 HomeAssistant 等智能家居平台~~(TODO)
+基于 ESP8266 使用 Arduino 开发的物联网小彩灯, 支持多种形态多种光效, 配套自研网页/小程序/PC 客户端, 并支持 HomeAssistant 等智能家居平台(由本分支进行开发)
 
 产品特色:
 - 支持多种产品形态: 如灯带, 圆形灯盘, 方形灯板等, 提供简单易用的接口供用户自行适配 
@@ -34,6 +34,7 @@
 - [FastLED](https://github.com/FastLED/FastLED)
 - [ArduinoJSON](https://github.com/bblanchon/ArduinoJson)
 - [arduinoWebSockets](https://github.com/Links2004/arduinoWebSockets)
+- [arduino-home-assistant](https://github.com/dawidchyrzynski/arduino-home-assistant/tree/main)
 
 **注意**: 如果你遇到了第一个灯会随机闪烁的问题, 请降级 ESP8266-Arduino 至 2.7.4 版本, FastLED 降级至 3.4.0 版本, 详见 [esp8266/Arduino#8054](https://github.com/esp8266/Arduino/issues/8054)
 

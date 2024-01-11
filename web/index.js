@@ -22,7 +22,7 @@ const LIGHT_MODES = {
     8: "custom"
 };
 
-const ws = new ReconnectingWebSocket("ws://" + (DEV_MODE ? "rgblight" : window.location.hostname) + ":81/", ["arduino"], {
+const ws = new ReconnectingWebSocket("ws://" + (DEV_MODE ? "rgblight.local" : window.location.hostname) + ":81/", ["arduino"], {
     maxEnqueuedMessages: 0,
     startClosed: true,
     debug: DEV_MODE

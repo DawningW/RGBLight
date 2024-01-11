@@ -20,7 +20,7 @@
     "mini-css-extract-plugin": "^2.7.6",
     "mini-svg-data-uri": "^1.4.4",
     "purgecss-webpack-plugin": "^5.0.0",
-    "terser-webpack-plugin": "^5.3.9",
+    "terser-webpack-plugin": "^5.3.10",
     "webpack": "^5.25.0",
     "webpack-bundle-analyzer": "^4.10.1",
     "webpack-cli": "^5.1.4",
@@ -31,6 +31,7 @@
     "flexi-color-picker": "^1.0.1",
     "qrjs": "^0.2.0",
     "reconnecting-websocket": "^4.4.0",
+    "sound-processor": "^1.0.0",
     "weui": "^2.6.7"
   }
 }

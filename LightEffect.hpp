@@ -500,8 +500,12 @@ public:
             hsv2rgb_rainbow(hsv, rgb);
             fill_solid(light.data(), light.count(), CRGB::Black);
             for (int i = light.r() - r; i < light.r(); i++) {
+                CRGB temp = rgb;
+                if (i == light.r() - r) {
+                    temp.nscale8_video(255 * (currentVolume - floor(light.r() * currentVolume) / light.r()) * light.r());
+                }
                 for (int j = 0; j < light.l(i); j++) {
-                    light.at(i, j) = rgb;
+                    light.at(i, j) = temp;
                 }
             }
         }

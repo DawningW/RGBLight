@@ -168,7 +168,7 @@ module.exports = (env) => {
             proxy: [
                 {
                     context: ["/version", "/config", "/status", "/list", "/upload", "/download", "/delete", "/upgrade"],
-                    target: "http://rgblight/",
+                    target: "http://rgblight.local/",
                     secure: false
                 }
             ]

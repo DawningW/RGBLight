@@ -69,10 +69,12 @@ void markDirty() {
     config.isDirty = true;
 }
 
-void serializeSettings(JsonDocument &doc) {
+void serializeSettings(JsonDocument &doc, bool includeWifi = true) {
     doc["name"] = config.name;
-    doc["ssid"] = config.ssid;
-    doc["password"] = config.password;
+    if (includeWifi) { // 获取 wifi 信息时不应包含密码
+        doc["ssid"] = config.ssid;
+        doc["password"] = config.password;
+    }
     doc["hostname"] = config.hostname;
     doc["refreshRate"] = config.refreshRate;
     doc["brightness"] = config.brightness;
@@ -129,6 +131,33 @@ void readSettings() {
     
     if (shouldSave) {
         saveSettings();
+    }
+}
+
+// 2.7.4 版本 MDNS 服务需要绑定到接口, 所以在每次切换接口时重启 MDNS 服务
+void setWifiMode(WiFiMode_t mode) {
+    dnsServer.stop();
+    MDNS.end();
+
+    WiFi.mode(mode);
+    WiFi.hostname(config.hostname);
+    delay(100);
+
+    if (mode == WIFI_AP) {
+        Serial.println(F("Start DNS server"));
+        dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
+        if (dnsServer.start(53, "*", WiFi.softAPIP())) {
+            Serial.println(F("DNS server started"));
+        }
+    }
+    Serial.println(F("Start mDNS"));
+    if (MDNS.begin(config.hostname)) {
+        MDNS.addService("http", "tcp", 80);
+        // MDNS.addService("ws", "tcp", 81);
+        MDNS.addServiceTxt("http", "tcp", "product", product_name);
+        MDNS.addServiceTxt("http", "tcp", "version", version);
+        MDNS.addServiceTxt("http", "tcp", "name", config.name);
+        Serial.println(F("MDNS responder started"));
     }
 }
 
@@ -190,7 +219,6 @@ bool startHotspot() {
 void updateLight() {
     if (lightEffect->update(light, 0)) {
         FastLED.show();
-        // delayMicroseconds(100);
     }
 }
 
@@ -305,15 +333,17 @@ void registerCommands() {
         if (WiFi.getMode() == WIFI_AP) {
             struct ip_info info;
             wifi_get_ip_info(SOFTAP_IF, &info);
+            doc["ssid"] = emptyString;
             doc["ip"] = IPAddress(info.ip.addr).toString();
             doc["mask"] = IPAddress(info.netmask.addr).toString();
             doc["gateway"] = IPAddress(info.gw.addr).toString();
         } else {
+            doc["ssid"] = WiFi.SSID();
             doc["ip"] = WiFi.localIP().toString();
             doc["mask"] = WiFi.subnetMask().toString();
             doc["gateway"] = WiFi.gatewayIP().toString();
         }
-        serializeSettings(doc);
+        serializeSettings(doc, false);
         String str;
         serializeJson(doc, str);
         sender(str.c_str());
@@ -335,7 +365,7 @@ void registerCommands() {
         String password(argc > 2 ? argv[2] : "");
         if (connectWifi(ssid, password)) {
             sender(WiFi.localIP().toString().c_str());
-            WiFi.mode(WIFI_STA);
+            setWifiMode(WIFI_STA);
             config.ssid = ssid;
             config.password = password;
             markDirty();
@@ -343,14 +373,14 @@ void registerCommands() {
             sender("ERR");
             if (WiFi.getMode() == WIFI_STA && !connectWifi(config.ssid, config.password)) {
                 startHotspot();
-                WiFi.mode(WIFI_AP);
+                setWifiMode(WIFI_AP);
             }
         }
     });
     cmdHandler.registerCommand("disconnect", "Disconnect from wifi", [](SenderFunc sender, int argc, char *argv[]) {
         startHotspot();
         sender("OK");
-        WiFi.mode(WIFI_AP);
+        setWifiMode(WIFI_AP);
         config.ssid = "";
         config.password = "";
         markDirty();
@@ -365,6 +395,10 @@ void registerCommands() {
         if (argc > 2) config.hostname = argv[2];
         markDirty();
         sender("OK");
+        if (WiFi.getMode() == WIFI_AP) {
+            startHotspot();
+        }
+        setWifiMode(WiFi.getMode());
     });
     cmdHandler.registerCommand("mode", "Get/set light mode", [](SenderFunc sender, int argc, char *argv[]) {
         if (argc <= 1) {
@@ -469,20 +503,15 @@ void setup() {
     WiFi.persistent(false);
     WiFi.setAutoReconnect(true);
     if (connectWifi(config.ssid, config.password)) {
-        WiFi.mode(WIFI_STA);
+        setWifiMode(WIFI_STA);
     } else {
         startHotspot();
-        WiFi.mode(WIFI_AP);
+        setWifiMode(WIFI_AP);
     }
-    WiFi.hostname(config.hostname);
 
     initEffects();
     registerCommands();
-    Serial.println(F("Start DNS server"));
-    dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
-    if (dnsServer.start(53, "*", WiFi.softAPIP())) {
-        Serial.println(F("DNS server started"));
-    }
+
     Serial.println(F("Start HTTP server"));
     webServer.onNotFound([]() {
         // Implement Captive Portal
@@ -648,15 +677,6 @@ void setup() {
         }
     });
     wsServer.begin();
-    Serial.println(F("Start mDNS"));
-    if (MDNS.begin(config.hostname)) { // FIXME 电脑上的 chrome 无法主动发现设备, 但是 Android APP 能
-        MDNS.addService("http", "tcp", 80);
-        // MDNS.addService("ws", "tcp", 81);
-        MDNS.addServiceTxt("http", "tcp", "product", product_name);
-        MDNS.addServiceTxt("http", "tcp", "version", version);
-        MDNS.addServiceTxt("http", "tcp", "name", config.name);
-        Serial.println(F("MDNS responder started"));
-    }
 }
 
 void loop() {

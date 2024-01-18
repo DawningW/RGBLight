@@ -427,7 +427,7 @@ document.getElementById("change-hostname").onclick = function() {
     let hostname = document.getElementById("hostname").innerText;
     $dialog("修改访问地址", `
         <input class="weui-input" type="text" placeholder="主机名" value="${hostname}">
-        <p>修改后需重启设备生效, 可通过 <span id="url"></span> 访问此页面</p> 
+        <p>可通过 <span id="url"></span> 访问此页面</p> 
     `, function() {
         let input = document.getElementById("dialog").getElementsByClassName("weui-input")[0];
         if (input.value == "") {

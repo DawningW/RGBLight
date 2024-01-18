@@ -12,12 +12,12 @@
   "license": "GPL-3.0",
   "devDependencies": {
     "compression-webpack-plugin": "^9.2.0",
-    "css-loader": "^6.8.1",
+    "css-loader": "^6.9.0",
     "css-minimizer-webpack-plugin": "^5.0.1",
     "filemanager-webpack-plugin": "^8.0.0",
     "glob-all": "^3.3.1",
     "html-webpack-plugin": "^5.3.1",
-    "mini-css-extract-plugin": "^2.7.6",
+    "mini-css-extract-plugin": "^2.7.7",
     "mini-svg-data-uri": "^1.4.4",
     "purgecss-webpack-plugin": "^5.0.0",
     "terser-webpack-plugin": "^5.3.10",
@@ -32,6 +32,6 @@
     "qrjs": "^0.2.0",
     "reconnecting-websocket": "^4.4.0",
     "sound-processor": "^1.0.0",
-    "weui": "^2.6.7"
+    "weui": "^2.6.11"
   }
 }

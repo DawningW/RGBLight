@@ -12,20 +12,20 @@
   "license": "GPL-3.0",
   "devDependencies": {
     "compression-webpack-plugin": "^9.2.0",
-    "css-loader": "^6.9.0",
+    "css-loader": "^6.10.0",
     "css-minimizer-webpack-plugin": "^5.0.1",
     "filemanager-webpack-plugin": "^8.0.0",
     "glob-all": "^3.3.1",
     "html-webpack-plugin": "^5.3.1",
-    "mini-css-extract-plugin": "^2.7.7",
+    "mini-css-extract-plugin": "^2.8.0",
     "mini-svg-data-uri": "^1.4.4",
     "purgecss-webpack-plugin": "^5.0.0",
     "terser-webpack-plugin": "^5.3.10",
-    "webpack": "^5.25.0",
+    "webpack": "^5.90.0",
     "webpack-bundle-analyzer": "^4.10.1",
     "webpack-cli": "^5.1.4",
     "webpack-dev-server": "^4.15.1",
-    "webpackbar": "^6.0.0"
+    "webpackbar": "^6.0.1"
   },
   "dependencies": {
     "flexi-color-picker": "^1.0.1",

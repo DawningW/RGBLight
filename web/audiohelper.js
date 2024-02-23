@@ -18,29 +18,11 @@ function easeInOutCubic(x) {
     return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
 }
 
-function startRecord(callback) {
-    if (!ctx) {
-        ctx = new AudioContext();
-        analyser = ctx.createAnalyser();
-        analyser.fftSize = 1024;
-        frequencies = new Uint8Array(analyser.frequencyBinCount);
-        soundProcessor = new SoundProcessor({
-			filterParams: {
-				sigma: 1,
-				radius: 2
-			},
-			sampleRate: ctx.sampleRate,
-			fftSize: analyser.fftSize,
-			startFrequency: 150,
-			endFrequency: 4500,
-			outBandsQty: 1,
-			tWeight: true,
-			aWeight: true
-		});
-    }
-
+function startRecord(onData, onError) {
     if (!window.navigator.mediaDevices) {
-        alert("因浏览器策略限制无法启动音频采集, 请前往 chrome://flags/#unsafely-treat-insecure-origin-as-secure, 将此页面的地址添加到列表中并重启浏览器");
+        let url = "chrome://flags/#unsafely-treat-insecure-origin-as-secure";
+        onError(`因浏览器策略限制无法启动音频采集, 请前往 ${url} (已自动复制到剪贴板), 将此页面的链接添加到列表中并重启浏览器`);
+        navigator.clipboard.writeText(url);
         return;
     }
 
@@ -48,6 +30,27 @@ function startRecord(callback) {
         "video": true,
         "audio": true
     }).then((stream) => {
+        // 自 Chrome 71 起收到用户手势后才可使用 Web Audio API, 详见: https://developer.chrome.com/blog/autoplay?hl=zh-cn#web_audio
+        if (!ctx) {
+            ctx = new AudioContext();
+            analyser = ctx.createAnalyser();
+            analyser.fftSize = 1024;
+            frequencies = new Uint8Array(analyser.frequencyBinCount);
+            soundProcessor = new SoundProcessor({
+                filterParams: {
+                    sigma: 1,
+                    radius: 2
+                },
+                sampleRate: ctx.sampleRate,
+                fftSize: analyser.fftSize,
+                startFrequency: 150,
+                endFrequency: 4500,
+                outBandsQty: 1,
+                tWeight: true,
+                aWeight: true
+            });
+        }
+
         mediaStream = stream;
         audioSource = ctx.createMediaStreamSource(stream);
         audioSource.connect(analyser);
@@ -55,20 +58,24 @@ function startRecord(callback) {
             analyser.getByteFrequencyData(frequencies);
             let result = soundProcessor.process(frequencies);
             let scale = easeInOutCubic(result[0] / 255);
-            callback(scale);
+            onData(scale);
         }, 50);
     }).catch((err) => {
-        alert("请共享整个屏幕并勾选同时共享系统音频以便使用音乐律动模式: " + err.message);
+        onError("请共享整个屏幕并勾选同时共享系统音频以便使用音乐律动模式, 错误详情: " + err.message);
     });
 }
 
 function stopRecord() {
-    if (mediaStream && audioSource) {
+    if (timerId) {
         clearInterval(timerId);
-        audioSource.disconnect();
-        mediaStream.getTracks().forEach(track => track.stop());
-        mediaStream = audioSource = null;
     }
+    if (audioSource) {
+        audioSource.disconnect();
+    }
+    if (mediaStream) {
+        mediaStream.getTracks().forEach(track => track.stop());
+    }
+    mediaStream = audioSource = timerId = null;
 }
 
 export {

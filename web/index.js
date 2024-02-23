@@ -182,6 +182,9 @@ function updateMode(newModeButton) {
     } else if (mode == "music") {
         startRecord(function(result) {
             cconsole.execute(String(Number(result).toFixed(2)));
+        }, function(message) {
+            stopRecord();
+            $dialog("音乐律动初始化失败", message, null, updateMode.bind(null, oldModeButton));
         });
     }
 }

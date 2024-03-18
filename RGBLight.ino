@@ -12,11 +12,23 @@
 #include <Arduino.h>
 #include <Ticker.h>
 #include <LittleFS.h>
+#if defined(ESP8266)
 #include <Updater.h>
+#elif defined(ESP32)
+#include <Update.h>
+#endif
 #include <DNSServer.h>
+#if defined(ESP8266)
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
 #include <ESP8266WebServer.h>
+typedef ESP8266WebServer WebServer;
+#elif defined(ESP32)
+#include <WiFi.h>
+#include <ESPmDNS.h>
+#include <WebServer.h>
+#include <detail/mimetable.h>
+#endif
 #include <WiFiUdp.h>
 #include <WebSocketsServer.h>
 #include <ArduinoJson.h>
@@ -45,7 +57,7 @@ Ticker timer;
 LIGHT_TYPE light;
 Effect *lightEffect;
 DNSServer dnsServer;
-ESP8266WebServer webServer(80);
+WebServer webServer(80);
 WebSocketsServer wsServer(81);
 
 struct Config {
@@ -172,7 +184,7 @@ int scanWifi(JsonArray &array) {
             obj["rssi"] = WiFi.RSSI(i);
             obj["type"] = WiFi.encryptionType(i);
             Serial.printf_P(PSTR("%d: %s (%d)%c\n"), i + 1, WiFi.SSID(i).c_str(), WiFi.RSSI(i),
-                (WiFi.encryptionType(i) == ENC_TYPE_NONE) ? ' ' : '*');
+                (WiFi.encryptionType(i) == 0) ? ' ' : '*');
         }
     } else {
         Serial.println(F("No wifi found"));
@@ -304,26 +316,46 @@ void registerCommands() {
         StaticJsonDocument<256> doc;
         doc["product"] = product_name;
         doc["model"] = model_name;
+#if defined(ESP8266)
         doc["id"] = ESP.getChipId();
+#elif defined(ESP32)
+        doc["id"] = ESP.getEfuseMac();
+#endif
         doc["version"] = version;
         doc["versionCode"] = version_code;
+#if defined(ESP8266)
         doc["sdkVersion"] = ESP.getFullVersion();
+#elif defined(ESP32)
+        doc["sdkVersion"] = ESP.getSdkVersion();
+#endif
         String str;
         serializeJson(doc, str);
         sender(str.c_str());
     });
     cmdHandler.registerCommand("status", "Show status", [](SenderFunc sender, int argc, char *argv[]) {
         StaticJsonDocument<256> doc;
+#if defined(ESP8266)
         doc["vcc"] = ESP.getVcc() / 1000.0;
         doc["resetReason"] = ESP.getResetReason();
         doc["freeHeap"] = ESP.getFreeHeap();
         doc["heapFragment"] = ESP.getHeapFragmentation();
         doc["maxFreeBlock"] = ESP.getMaxFreeBlockSize();
+#elif defined(ESP32)
+        doc["freeHeap"] = ESP.getFreeHeap();
+        doc["heapMaxFreeBlock"] = ESP.getMaxAllocHeap();
+        doc["freePsram"] = ESP.getFreePsram();
+        doc["psramMaxFreeBlock"] = ESP.getMaxAllocPsram();
+#endif
         doc["RSSI"] = WiFi.RSSI();
+#if defined(ESP8266)
         FSInfo fs_info;
         LittleFS.info(fs_info);
         doc["fsTotalSpace"] = fs_info.totalBytes;
         doc["fsUsedSpace"] = fs_info.usedBytes;
+#elif defined(ESP32)
+        doc["fsTotalSpace"] = LittleFS.totalBytes();
+        doc["fsUsedSpace"] = LittleFS.usedBytes();
+#endif
         String str;
         serializeJson(doc, str);
         sender(str.c_str());
@@ -331,12 +363,19 @@ void registerCommands() {
     cmdHandler.registerCommand("config", "Get config", [](SenderFunc sender, int argc, char *argv[]) {
         StaticJsonDocument<1024> doc;
         if (WiFi.getMode() == WIFI_AP) {
+#if defined(ESP8266)
             struct ip_info info;
             wifi_get_ip_info(SOFTAP_IF, &info);
             doc["ssid"] = emptyString;
             doc["ip"] = IPAddress(info.ip.addr).toString();
             doc["mask"] = IPAddress(info.netmask.addr).toString();
             doc["gateway"] = IPAddress(info.gw.addr).toString();
+#elif defined(ESP32)
+            doc["ssid"] = WiFi.softAPSSID();
+            doc["ip"] = WiFi.softAPIP().toString();
+            doc["mask"] = WiFi.softAPSubnetMask().toString();
+            doc["gateway"] = WiFi.softAPIP().toString();
+#endif
         } else {
             doc["ssid"] = WiFi.SSID();
             doc["ip"] = WiFi.localIP().toString();
@@ -475,7 +514,9 @@ void registerCommands() {
     });
 }
 
+#ifdef ESP8266
 ADC_MODE(ADC_VCC); // Enable ESP.getVcc()
+#endif
 
 void setup() {
     FastLED.addLeds<LED_TYPE, LED_DATA_PIN, LED_COLOR_ORDER>(light.data(), light.count());
@@ -497,7 +538,11 @@ void setup() {
     gdbstub_init(); // XXX 在 esp8266-arduino 3.0+ 上疑似会严重干扰 LED 时序
 #endif
 
+#if defined(ESP8266)
     LittleFS.begin();
+#elif defined(ESP32)
+    LittleFS.begin(true); // XXX Arduino IDE 2.0 目前无 ESP32 上传文件系统插件, 所以默认格式化, 然后用 OTA 功能上传
+#endif
     readSettings();
 
     WiFi.persistent(false);
@@ -551,6 +596,7 @@ void setup() {
         }
         DynamicJsonDocument doc(1024);
         JsonArray array = doc.to<JsonArray>();
+#if defined(ESP8266)
         Dir dir = LittleFS.openDir(path);
         while (dir.next()) {
             JsonObject obj = array.createNestedObject();
@@ -558,6 +604,19 @@ void setup() {
             obj["size"] = dir.fileSize();
             obj["isDir"] = dir.isDirectory();
         }
+#elif defined(ESP32)
+        File dir = LittleFS.open(path);
+        if (dir.isDirectory()) {
+            File file;
+            while (file = dir.openNextFile()) {
+                JsonObject obj = array.createNestedObject();
+                obj["name"] = file.name();
+                obj["size"] = file.size();
+                obj["isDir"] = file.isDirectory();
+                file.close();
+            }
+        }
+#endif
         String str;
         serializeJson(doc, str);
         webServer.send(200, MIME_TYPE(json), str);
@@ -700,12 +759,15 @@ void loop() {
     dnsServer.processNextRequest();
     webServer.handleClient();
     wsServer.loop();
+#if defined(ESP8266)
     MDNS.update();
+#endif
 }
 
 #ifdef ENABLE_DEBUG
 void printSystemInfo() {
     Serial.println("----- System Information -----");
+#if defined(ESP8266)
     Serial.printf("Supply voltage: %.3fV\r\n", ESP.getVcc() / 1000.0);
     Serial.printf("Reset reason: %s\r\n", ESP.getResetReason().c_str());
     Serial.printf("Chip ID: %u\r\n", ESP.getChipId());
@@ -723,6 +785,7 @@ void printSystemInfo() {
     Serial.printf("Flash chip real size: %u\r\n", ESP.getFlashChipRealSize());
     Serial.printf("Flash chip speed: %u\r\n", ESP.getFlashChipSpeed());
     Serial.printf("Cycle count: %u\r\n", ESP.getCycleCount());
+#endif
 }
 
 void printWifiInfo() {

@@ -60,6 +60,8 @@ npm run build
 ### 编译并烧录
 除了需要烧录程序以外, 还需要上传 LittleFS 文件系统, 具体教程可参考 [Uploading files to file system](https://arduino-esp8266.readthedocs.io/en/stable/filesystem.html#uploading-files-to-file-system)
 
+Arduino IDE 2.2.1+ 可使用此插件为 RP2040/ESP8266/ESP32 上传 LittleFS 文件系统: [arduino-littlefs-upload](https://github.com/earlephilhower/arduino-littlefs-upload)
+
 ### 打包升级包
 ArduinoOTA 是支持在线升级文件系统的, 但是遗憾的是并不支持差量更新, 为了不丢失用户配置和自定义动画等数据, 我选择把 bin 和资源文件打包为单个二进制文件, 再由上位机进行解析更新
 

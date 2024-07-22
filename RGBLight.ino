@@ -1,7 +1,7 @@
 /**
  * RGB Light 炫酷 RGB 灯
  *
- * 基于 ESP8266 使用 Arduino 开发的物联网炫酷小彩灯, 支持多种形态多种光效, 配套自研网页/小程序/PC 客户端
+ * 基于 ESP8266/ESP32 使用 Arduino 开发的物联网炫酷小彩灯, 支持多种形态多种光效, 配套自研网页/小程序/PC 客户端
  *
  * @author QingChenW
  */
@@ -341,6 +341,7 @@ void registerCommands() {
         doc["heapFragment"] = ESP.getHeapFragmentation();
         doc["maxFreeBlock"] = ESP.getMaxFreeBlockSize();
 #elif defined(ESP32)
+        doc["resetReason"] = esp_reset_reason();
         doc["freeHeap"] = ESP.getFreeHeap();
         doc["heapMaxFreeBlock"] = ESP.getMaxAllocHeap();
         doc["freePsram"] = ESP.getFreePsram();
@@ -610,7 +611,7 @@ void setup() {
             File file;
             while (file = dir.openNextFile()) {
                 JsonObject obj = array.createNestedObject();
-                obj["name"] = file.name();
+                obj["name"] = String(file.name());
                 obj["size"] = file.size();
                 obj["isDir"] = file.isDirectory();
                 file.close();
@@ -638,7 +639,11 @@ void setup() {
         HTTPUpload &upload = webServer.upload();
         if (upload.status == UPLOAD_FILE_START) {
             String path = webServer.arg("path") + "/" + upload.filename;
+#if defined(ESP8266)
             uploadFile = LittleFS.open(path, "w");
+#elif defined(ESP32)
+            uploadFile = LittleFS.open(path, "w", true);
+#endif
             if (!uploadFile) {
                 webServer.send(500, MIME_TYPE(txt), PSTR("Internal server error"));
                 return;

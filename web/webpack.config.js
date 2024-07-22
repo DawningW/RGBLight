@@ -57,7 +57,7 @@ module.exports = (env) => {
             }),
             new HtmlWebpackPlugin({
                 title: config.NAME || "RGBLight",
-                filename: "index.html",
+                filename: "index.htm", // XXX ESP32 的 StaticDirectoryRequestHandler 仅查找 index.htm
                 template: "./index.html",
                 favicon: "./public/favicon.ico",
                 minify: true

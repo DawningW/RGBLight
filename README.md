@@ -1,7 +1,7 @@
 # RGB Light
 # 炫酷 R! G! B! 灯
 
-基于 ESP8266 使用 Arduino 开发的物联网小彩灯, 支持多种形态多种光效, 配套自研网页/小程序/PC 客户端, ~~并支持 HomeAssistant 等智能家居平台~~(TODO)
+基于 ESP8266/ESP32 使用 Arduino 开发的物联网小彩灯, 支持多种形态多种光效, 配套自研网页/小程序/PC 客户端, ~~并支持 HomeAssistant 等智能家居平台~~(TODO)
 
 产品特色:
 - 支持多种产品形态: 如灯带, 圆形灯盘, 方形灯板等, 提供简单易用的接口供用户自行适配 
@@ -14,9 +14,9 @@
 
 ## 所需硬件
 ### MCU
-目前仅在 ESP8266 上测试过, 理论上简单适配一下即可支持 ESP32, 但未测试
+目前已在 ESP8266/ESP32-C3 上测试过, 理论上简单适配一下即可支持其他单片机
 
-我使用的开发版为 WeMos D1 Mini, 使用 D4 脚连接 WS2812B
+我使用的开发板为 WeMos D1 Mini, 使用 D4 脚连接 WS2812B
 
 ### 灯板
 目前支持两种灯板:
@@ -32,12 +32,15 @@
 
 ## 编译指南
 ### 安装 Arduino 和第三方库
-- [ESP8266-Arduino](https://github.com/esp8266/Arduino)
+- [ESP8266-Arduino](https://github.com/esp8266/Arduino) (esp8266)
+- [arduino-esp32](https://github.com/espressif/arduino-esp32) (esp32)
 - [FastLED](https://github.com/FastLED/FastLED)
 - [ArduinoJSON](https://github.com/bblanchon/ArduinoJson)
 - [arduinoWebSockets](https://github.com/Links2004/arduinoWebSockets)
 
-**注意**: 如果你遇到了第一个灯会随机闪烁的问题, 请降级 ESP8266-Arduino 至 2.7.4 版本, FastLED 降级至 3.4.0 版本, 详见 [esp8266/Arduino#8054](https://github.com/esp8266/Arduino/issues/8054)
+**注意**: 如果你在 ESP8266 上遇到了第一个灯会随机闪烁的问题, 请降级 ESP8266-Arduino 至 2.7.4 版本, FastLED 降级至 3.4.0 版本, 详见 [esp8266/Arduino#8054](https://github.com/esp8266/Arduino/issues/8054)
+
+**注意**: 如果你在 ESP32-C3 上遇到了第一个灯不亮, 其余灯随机闪烁的问题, 请更新 FastLED 至 3.7.0 版本, 详见 [FastLED/FastLED#1349](https://github.com/FastLED/FastLED/issues/1349)
 
 ### 修改配置
 根据您的需求修改 config.h 中的配置

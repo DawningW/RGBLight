@@ -160,7 +160,12 @@ module.exports = (env) => {
         devtool: env.production ? "source-map" : "eval-source-map",
         devServer: {
             static: "./public",
-            historyApiFallback: true,
+            devMiddleware: {
+                index: "index.htm"
+            },
+            historyApiFallback: {
+                index: "/index.htm"
+            },
             hot: true,
             client: {
                 progress: true

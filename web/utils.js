@@ -30,6 +30,24 @@ function rgb2hex(r, g, b) {
 }
 
 /**
+ * convert hex color to rgba color
+ * 
+ * @param {String} color hex color string
+ * @returns {{ r: Number, g: Number, b: Number, a: Number }} rgba color object
+ */
+function hex2rgba(color) {
+    if (color.at(0) === "#" && (color.length === 7 || color.length === 9)) {
+        return {
+            r: parseInt(color.slice(1, 3), 16) / 255,
+            g: parseInt(color.slice(3, 5), 16) / 255,
+            b: parseInt(color.slice(5, 7), 16) / 255,
+            a: color.length === 9 ? parseInt(color.slice(7, 9), 16) / 255 : 1,
+        };
+    }
+    throw new Error("invalid hex color string");
+}
+
+/**
  * polyfill for TextDecoder
  * 
  * @param {Uint8Array} bytes utf-8 encoded bytes
@@ -39,4 +57,4 @@ function bytes2str(bytes) {
     return String.fromCodePoint(...Array.from(bytes));
 }
 
-export { zfill, rgb2hex, bytes2str };
+export { zfill, rgb2hex, hex2rgba, bytes2str };

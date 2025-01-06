@@ -384,46 +384,24 @@ public:
     }
 
     bool update(Light &light, uint32_t deltaTime) override {
-        if (!file) {
+        if (!file || file.size() == 0) {
             return false;
         }
 #ifdef ENABLE_DEBUG
         Serial.printf_P(PSTR("Playing anim frame: %d\n"), currentFrame);
 #endif
-        char buffer[8] = "";
-        int bufLen = 0;
         int index = 0;
-        while (true) {
-            char c;
-            // read a byte
-            if (file.read((uint8_t *) &c, 1) != 1) {
+        while (index < light.count()) {
+            CRGB &pixel = light.data()[index];
+            if (file.read(pixel.raw, sizeof(pixel.raw)) != sizeof(pixel.raw)) {
                 Serial.println(F("End of animation, replay"));
                 file.seek(0);
                 currentFrame = 0;
-                break;
-            }
-            // parse data
-            if (c == ',' || c == '\n') {
-                buffer[bufLen] = '\0';
-                if (buffer[0] == '#' && bufLen == 7) {
-                    buffer[bufLen] = '\0';
-                    light.data()[index++] = str2hex(buffer);
-                    bufLen = 0;
-                } else {
-                    Serial.printf_P(PSTR("Invalid anim element: %s\n"), buffer);
-                }
-                if (c == '\n') {
-                    currentFrame++;
-                    break;
-                }
-            } else if (c == '\r') {
                 continue;
-            } else {
-                if (bufLen < 7) {
-                    buffer[bufLen++] = c;
-                }
             }
+            index++;
         }
+        currentFrame++;
         return true;
     }
 

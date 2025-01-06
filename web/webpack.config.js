@@ -44,7 +44,7 @@ module.exports = (env) => {
         entry: "./index.js",
         output: {
             path: path.resolve(__dirname, "build"),
-            filename: "bundle.js",
+            filename: "[name].bundle.js",
             clean: true
         },
         plugins: [
@@ -53,7 +53,7 @@ module.exports = (env) => {
                 "process.env": {
                     "NODE_ENV": JSON.stringify(mode)
                 },
-                "DEVICE_CONFIG": config
+                "DEVICE_CONFIG": JSON.stringify(config)
             }),
             new HtmlWebpackPlugin({
                 title: config.NAME || "RGBLight",
@@ -68,7 +68,7 @@ module.exports = (env) => {
                     path.join(__dirname, "index.html"),
                     path.join(__dirname, "*.css")
                 ], { nodir: true }),
-                safelist: [/^picker/, /^slide/, /weui-btn_warn/, /weui-icon-success-no-circle/, /weui-icon-warn/, /weui-primary-loading/, /weui-primary-loading__dot/]
+                safelist: [/^picker/, /^slide/, /weui-btn_warn/, /weui-icon-success-no-circle/, /weui-icon-warn/, /weui-primary-loading/, /weui-primary-loading__dot/, /^theatrejs/]
             }),
             new CompressionPlugin({
                 algorithm: "gzip",
@@ -91,6 +91,14 @@ module.exports = (env) => {
                             copy: [
                                 { source: "./build/*.gz", destination: `${deployPath}` }
                             ]
+                        },
+                        {
+                            delete: [{
+                                source: `${deployPath}/*.LICENSE.txt.gz`,
+                                options: {
+                                    force: true
+                                }
+                            }]
                         }
                     ]
                 }
@@ -125,6 +133,9 @@ module.exports = (env) => {
             ]
         },
         optimization: {
+            splitChunks: {
+                enforceSizeThreshold: 0
+            },
             minimize: true,
             minimizer: [
                 new TerserPlugin({
@@ -132,17 +143,18 @@ module.exports = (env) => {
                         compress: env.production ? {
                             drop_console: ["debug", "trace", "assert"]
                         } : false,
-                        mangle: env.production ? {
-                            properties: {
-                                builtins: false, // FIXME 开了还能再小 1k, 但是跑不起来
-                                keep_quoted: true,
-                                reserved: ["$dialog", "$toast", "$info"],
-                                undeclared: true
-                            },
-                            module: true,
-                            reserved: [],
-                            toplevel: true
-                        } : false
+                        // mangle: env.production ? {
+                        //     properties: {
+                        //         builtins: false, // FIXME 开了还能再小 1k, 但是跑不起来
+                        //         keep_quoted: true,
+                        //         reserved: ["$dialog", "$toast", "$info"],
+                        //         undeclared: true
+                        //     },
+                        //     module: true,
+                        //     reserved: [],
+                        //     toplevel: true
+                        // } : false
+                        mangle: false // FIXME 混淆之后动画编辑器跑不起来了
                     }
                 }),
                 new CssMinimizerPlugin({

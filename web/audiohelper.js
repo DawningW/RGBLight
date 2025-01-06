@@ -2,7 +2,7 @@
  * 音乐律动
  */
 
-import {SoundProcessor} from "sound-processor";
+import { SoundProcessor } from "sound-processor";
 
 const AudioContext = window.AudioContext || window.webkitAudioContext || window.mozAudioContext;
 let ctx;

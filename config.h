@@ -6,9 +6,9 @@
 // #define MODEL "D1_mini_WCLightPanel" // 投影灯版本, 原理图详见 pcb 文件夹
 // #define MODEL "NodeMCU_LightCube" // 16 * 16 光立方版本 (WIP)
 // 版本号
-#define VERSION "V0.2.0"
+#define VERSION "V0.3.0"
 // 版本代码, 用于检查更新
-#define VERSION_CODE 3
+#define VERSION_CODE 4
 
 /****************************** 硬件配置 ******************************/
 // LED 灯数据引脚

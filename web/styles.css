@@ -79,9 +79,22 @@ html, body, #main {
     display: block;
     position: relative;
     right: 16px;
-    bottom: 104px;
+    bottom: 168px;
     margin: 0 0 0 auto;
     z-index: 1000;
+}
+
+.floating-btn_round {
+    min-width: auto;
+    max-width: none;
+    width: 48px;
+    height: 48px;
+    font-size: 30px;
+    padding: 0;
+    border-radius: 50%;
+}
+.floating-btn_round:active::before {
+    border-radius: 50%;
 }
 
 #message {
@@ -184,4 +197,9 @@ html, body, #main {
 .cp-input {
     clear: both;
     padding-top: 4px;
+}
+
+/* Anim editor */
+#theatrejs-studio-root {
+    z-index: 1000 !important;
 }

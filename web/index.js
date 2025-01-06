@@ -8,6 +8,23 @@ import CConsole from "./cconsole.js";
 import { startRecord, stopRecord } from "./audiohelper.js";
 import { rgb2hex, bytes2str } from "./utils.js";
 
+/**
+ * @type {typeof import("./editor.js")}
+ */
+let editor = null;
+async function loadEditor() {
+    if (editor == null) {
+        const hideToast = $toast("loading", "正在加载动画编辑器", -1);
+        try {
+            editor = await import(/* webpackChunkName: "editor" */ "./editor.js");
+            hideToast();
+        } catch (err) {
+            $toast("fail", "加载失败");
+        }
+    }
+    return editor;
+}
+
 const DEV_MODE = process.env.NODE_ENV !== "production";
 // 需与 enum EffectType 保持一致
 const LIGHT_MODES = {
@@ -91,6 +108,7 @@ window.$toast = function(status, message, duration) {
             toast.style.display = "none";
         }, duration || 2000);
     }
+    return () => toast.style.display = "none";
 }
 
 window.$info = function(level, message, closeable) {
@@ -124,6 +142,8 @@ for (let element of document.getElementsByClassName("weui-tabbar__item")) {
         document.getElementById(this.id.replace("tab", "panel")).style.display = "block";
         if (this.id == "tab2") {
             refreshFileList(true);
+        } else {
+            document.getElementById("add-anim").style.visibility = "hidden";
         }
     }
 }
@@ -171,10 +191,12 @@ function updateMode(newModeButton) {
                 let animName = document.getElementById("animName");
                 animName.innerHTML = "<option value='' selected></option>";
                 for (let file of files) {
-                    if (file["isDir"]) continue;
+                    if (file["isDir"] || !file["name"].endsWith(".bin")) {
+                        continue;
+                    }
                     let option = document.createElement("option");
                     option.value = file["name"];
-                    option.innerText = file["name"].split(".")[0];
+                    option.innerText = file["name"].split(".")[1];
                     animName.appendChild(option);
                 }
             });
@@ -278,6 +300,9 @@ function refreshFileList(refreshSpace = false) {
                 })
             }
             for (let file of files) {
+                if (file["name"] != ".." && file["name"].startsWith(".")) {
+                    continue;
+                }
                 let item = document.createElement("div");
                 item.classList.add("weui-cell");
                 if (file["isDir"]) {
@@ -301,6 +326,17 @@ function refreshFileList(refreshSpace = false) {
                 let ft = document.createElement("span");
                 ft.classList.add("weui-cell__ft");
                 if (!file["isDir"]) {
+                    if (viewPath.includes("animations/") && file["name"].endsWith(".json")) {
+                        let edit = document.createElement("a");
+                        edit.classList.add("weui-btn", "weui-btn_mini", "weui-btn_default");
+                        edit.innerText = "编辑";
+                        edit.onclick = function() {
+                            loadEditor().then(({ editAnimation }) => {
+                                editAnimation(file["name"].replace(".json", ""));
+                            });
+                        }
+                        ft.appendChild(edit);
+                    }
                     let dl = document.createElement("a");
                     dl.classList.add("weui-btn", "weui-btn_mini", "weui-btn_primary");
                     dl.innerText = "下载";
@@ -333,6 +369,8 @@ function refreshFileList(refreshSpace = false) {
             });
         });
     }
+    document.getElementById("add-anim").style.visibility =
+        viewPath.join("") == "/animations/" ? "visible" : "hidden";
 }
 
 function uploadFile(path, file) {
@@ -360,6 +398,21 @@ document.getElementById("upload").onclick = function() {
 
 document.getElementById("refresh").onclick = function() {
     refreshFileList();
+}
+
+document.getElementById("add-anim").onclick = function() {
+    $dialog("新建动画", `
+        <input class="weui-input" type="text" placeholder="动画名称">
+    `, function() {
+        let input = document.getElementById("dialog").getElementsByClassName("weui-input")[0];
+        if (input.value == "") {
+            $toast("fail", "动画名称无效");
+            return;
+        }
+        loadEditor().then(({ editAnimation }) => {
+            editAnimation(input.value);
+        });
+    });
 }
 
 // settings

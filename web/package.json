@@ -12,26 +12,30 @@
   "license": "GPL-3.0",
   "devDependencies": {
     "compression-webpack-plugin": "^9.2.0",
-    "css-loader": "^6.10.0",
+    "css-loader": "^6.11.0",
     "css-minimizer-webpack-plugin": "^5.0.1",
     "filemanager-webpack-plugin": "^8.0.0",
     "glob-all": "^3.3.1",
-    "html-webpack-plugin": "^5.3.1",
+    "html-webpack-plugin": "^5.6.3",
     "mini-css-extract-plugin": "^2.8.0",
     "mini-svg-data-uri": "^1.4.4",
     "purgecss-webpack-plugin": "^5.0.0",
-    "terser-webpack-plugin": "^5.3.10",
-    "webpack": "^5.90.0",
-    "webpack-bundle-analyzer": "^4.10.1",
+    "terser-webpack-plugin": "^5.3.11",
+    "webpack": "^5.97.1",
+    "webpack-bundle-analyzer": "^4.10.2",
     "webpack-cli": "^5.1.4",
-    "webpack-dev-server": "^4.15.1",
+    "webpack-dev-server": "^4.15.2",
     "webpackbar": "^6.0.1"
   },
   "dependencies": {
+    "@theatre/core": "^0.7.2",
+    "@theatre/dataverse": "^0.7.2",
+    "@theatre/studio": "^0.7.2",
     "flexi-color-picker": "^1.0.1",
     "qrjs": "^0.2.0",
+    "react": "^18.2.0",
     "reconnecting-websocket": "^4.4.0",
     "sound-processor": "^1.0.0",
-    "weui": "^2.6.11"
+    "weui": "^2.6.21"
   }
 }

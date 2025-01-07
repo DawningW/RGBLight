@@ -36,6 +36,12 @@ module.exports = (env) => {
     console.log("Build mode:", mode);
     const config = readConfig();
     console.log("Device config:", JSON.stringify(config, null, 4));
+    const groups = config.LIGHT_TYPE.match(/(.+)\s*<(.*)>/);
+    const lightType = {
+        type: groups[1].trim(),
+        args: groups[2].split(",").map((s) => s.trim())
+    };
+    console.log("Light type:", JSON.stringify(lightType, null, 4));
     const deployPath = fg.convertPathToPattern(path.resolve(__dirname, "..", "data", "www"));
     console.log("Deploy webpage to", deployPath);
 
@@ -53,7 +59,8 @@ module.exports = (env) => {
                 "process.env": {
                     "NODE_ENV": JSON.stringify(mode)
                 },
-                "DEVICE_CONFIG": JSON.stringify(config)
+                "DEVICE_CONFIG": JSON.stringify(config),
+                "LIGHT_TYPE": JSON.stringify(lightType)
             }),
             new HtmlWebpackPlugin({
                 title: config.NAME || "RGBLight",

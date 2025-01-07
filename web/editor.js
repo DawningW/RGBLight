@@ -6,18 +6,38 @@ const studioPrivate = window.__TheatreJS_StudioBundle._studio;
 let projectId = "";
 let objs = [];
 
-const LIGHT_TYPE = DEVICE_CONFIG["LIGHT_TYPE"];
-let direction = "";
 let leds = [];
-if (LIGHT_TYPE.startsWith("LightStrip")) {
-    const groups = LIGHT_TYPE.match(/LightStrip\s*<(.+),(.+)>/);
-    leds = [parseInt(groups[1].trim())];
-} else if (LIGHT_TYPE.startsWith("LightDisc")) {
-    const groups = LIGHT_TYPE.match(/LightDisc\s*<(.+?),(.*)>/);
-    direction = groups[1].trim();
-    leds = groups[2].split(",").map((x) => parseInt(x.trim()));
+if (LIGHT_TYPE.type == "LightStrip") {
+    leds = [parseInt(LIGHT_TYPE.args[0])];
+} else if (LIGHT_TYPE.type == "LightDisc") {
+    leds = LIGHT_TYPE.args.slice(1).map((s) => parseInt(s));
 }
 let ledCounts = leds.reduce((a, b) => a + b, 0);
+const renderLeds = () => {
+    if (LIGHT_TYPE.type == "LightStrip") {
+        return `
+            <div id="leds" style="display: flex; flex-direction: row; gap: 5px;">
+                ${Array(ledCounts).fill().map((_, i) => `<div style="width: 20px; height: 20px;"></div>`).join("")}
+            </div>
+        `;
+    } else if (LIGHT_TYPE.type == "LightDisc") {
+        const INITIAL_ANGLES = [Math.PI / 12, 0, -Math.PI / 4]; /* 15°, 0°, -45° */
+        return `
+            <div id="leds" style="position: relative;">
+                ${leds.map((count, i) =>
+                    Array(count).fill().map((_, j) => {
+                        let r = (2 * (leds.length - i - 1) + 1) * 40;
+                        let angle = (2 * Math.PI / count) * j + INITIAL_ANGLES[i] + Math.PI / 2;
+                        let x = r * Math.cos(angle);
+                        let y = r * Math.sin(angle);
+                        return `<div style="position: absolute; width: 20px; height: 20px; left: ${x}px; bottom: ${y}px; transform: rotate(${Math.PI / 2 - angle}rad);"></div>`;
+                    }).join("")
+                ).join("")}
+            </div>
+        `;
+    }
+    return "";
+};
 
 studio.extend({
     id: 'rgblight-extension',
@@ -43,13 +63,7 @@ studio.extend({
         {
             class: 'Preview',
             mount({paneId, node}) {
-                node.innerHTML = `
-                    <div style="width: 100%; height: 100%; display: flex; justify-content: center; align-items: center;">
-                        <div id="leds" style="display: flex; flex-direction: row; gap: 5px;">
-                            ${Array(ledCounts).fill().map((_, i) => `<div style="width: 20px; height: 20px; background-color: white;"></div>`).join("")}
-                        </div>
-                    </div>
-                `;
+                node.innerHTML = `<div style="width: 100%; height: 100%; display: flex; justify-content: center; align-items: center;">${renderLeds()}</div>`;
                 return () => {}
             },
         },
@@ -144,7 +158,7 @@ export async function editAnimation(name) {
         let obj = sheet.__experimental_getExistingObject(objName);
         if (!obj) {
             obj = sheet.object(`LED ${i + 1}`, {
-                color: types.rgba({ r: 1, g: 1, b: 1, a: 1 }),
+                color: types.rgba({ r: 0, g: 0, b: 0, a: 1 }),
             });
         }
 

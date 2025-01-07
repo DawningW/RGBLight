@@ -172,7 +172,7 @@ document.getElementById("refreshRate").onchange = function() {
     cconsole.execute("fps," + this.value);
 }
 
-function updateMode(newModeButton) {
+async function updateMode(newModeButton) {
     let oldModeButton = document.getElementById("mode").getElementsByClassName("weui-btn_disabled")[0];
     oldModeButton.removeAttribute("disabled");
     oldModeButton.classList.remove("weui-btn_disabled");
@@ -185,22 +185,22 @@ function updateMode(newModeButton) {
 
     let mode = newModeButton.id;
     if (mode == "animation") {
-        fetch("/list?path=/animations").then((response) => {
-            if (!response.ok) return;
-            response.json().then((files) => {
-                let animName = document.getElementById("animName");
-                animName.innerHTML = "<option value='' selected></option>";
-                for (let file of files) {
-                    if (file["isDir"] || !file["name"].endsWith(".bin")) {
-                        continue;
-                    }
-                    let option = document.createElement("option");
-                    option.value = file["name"];
-                    option.innerText = file["name"].split(".")[1];
-                    animName.appendChild(option);
-                }
-            });
-        });
+        const response = await fetch("/list?path=/animations");
+        if (!response.ok) return;
+        let files = await response.json();
+        let animName = document.getElementById("animName");
+        let lastValue = animName.value;
+        animName.innerHTML = "<option value='' selected></option>";
+        for (let file of files) {
+            if (file["isDir"] || !file["name"].endsWith(".bin")) {
+                continue;
+            }
+            let option = document.createElement("option");
+            option.value = file["name"];
+            option.innerText = file["name"].split(".")[1];
+            animName.appendChild(option);
+        }
+        animName.value = lastValue;
     } else if (mode == "music") {
         startRecord(function(result) {
             cconsole.execute(String(Number(result).toFixed(2)));
@@ -571,39 +571,38 @@ const setQrcode = (data) => document.getElementById("qrcode").src = QRCode.gener
     margin: 2.5
 });
 
-function refreshConfig() {
-    fetch("/config").then((response) => {
-        if (!response.ok) return;
-        response.json().then(config => {
-            document.title = config["name"];
-            setQrcode("http://" + config["ip"] + "/");
-            document.getElementById("ssid").innerHTML = config["ssid"] || "未连接";
-            document.getElementById("name").innerText = config["name"];
-            document.getElementById("hostname").innerText = config["hostname"];
+async function refreshConfig() {
+    const response = await fetch("/config");
+    if (!response.ok) return;
+    let config = await response.json();
+    document.title = config["name"];
+    setQrcode("http://" + config["ip"] + "/");
+    document.getElementById("ssid").innerHTML = config["ssid"] || "未连接";
+    document.getElementById("name").innerText = config["name"];
+    document.getElementById("hostname").innerText = config["hostname"];
 
-            document.getElementById("brightness").value = config["brightness"];
-            document.getElementById("temperature").value = config["temperature"];
-            document.getElementById("refreshRate").value = config["refreshRate"];
+    document.getElementById("brightness").value = config["brightness"];
+    document.getElementById("temperature").value = config["temperature"];
+    document.getElementById("refreshRate").value = config["refreshRate"];
 
-            updateMode(document.getElementById(LIGHT_MODES[config["mode"]]));
-            let color = config["color"] || 0xFFFFFF;
-            let rgb = {
-                r: (color & 0xFF0000) >> 16,
-                g: (color & 0x00FF00) >> 8,
-                b: (color & 0x0000FF) >> 0
-            };
-            colorpicker.prevent = true;
-            colorpicker.setRgb(rgb);
-            document.getElementById("r").value = rgb["r"];
-            document.getElementById("g").value = rgb["g"];
-            document.getElementById("b").value = rgb["b"];
-            colorpicker.prevent = false;
-            document.getElementById("lastTime").value = config["lastTime"] || 1.0;
-            document.getElementById("interval").value = config["interval"] || 1.0;
-            document.getElementById("delta").value = config["delta"] || 1;
-            document.getElementById("animName").value = config["animName"] || "";
-        });
-    });
+    let promise = updateMode(document.getElementById(LIGHT_MODES[config["mode"]]));
+    let color = config["color"] || 0xFFFFFF;
+    let rgb = {
+        r: (color & 0xFF0000) >> 16,
+        g: (color & 0x00FF00) >> 8,
+        b: (color & 0x0000FF) >> 0
+    };
+    colorpicker.prevent = true;
+    colorpicker.setRgb(rgb);
+    document.getElementById("r").value = rgb["r"];
+    document.getElementById("g").value = rgb["g"];
+    document.getElementById("b").value = rgb["b"];
+    colorpicker.prevent = false;
+    document.getElementById("lastTime").value = config["lastTime"] || 1.0;
+    document.getElementById("interval").value = config["interval"] || 1.0;
+    document.getElementById("delta").value = config["delta"] || 1;
+    await promise; // Wait for loading anim list
+    document.getElementById("animName").value = config["animName"] || "";
 }
 
 window.onload = function() {

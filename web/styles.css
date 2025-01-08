@@ -202,4 +202,5 @@ html, body, #main {
 /* Anim editor */
 #theatrejs-studio-root {
     z-index: 1000 !important;
+    margin-top: 64px;
 }

@@ -1,2 +1,4 @@
 .vscode/
+.pio/
 build/
+upgrade.bin

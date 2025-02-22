@@ -12,7 +12,7 @@ import hashlib
 
 bin_path = "./build/RGBLight.ino.bin"
 data_path = "./data"
-output_path = "./build"
+output_path = "./"
 upgrade_pack_name = "upgrade.bin"
 
 class UpgradeOperation(IntEnum):
@@ -48,13 +48,16 @@ class UpgradeFileHeader:
         return temp
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        bin_path = sys.argv[1]
+
     if not os.path.exists(bin_path):
         print("未找到编译后的 bin 文件, 请先编译项目或将 bin_path 变量改为编译输出目录")
         exit(1)
 
     # 从 config.h 中获取版本号
     version = 0
-    with open("./config.h", "r", encoding="utf-8") as file:
+    with open("./src/config.h", "r", encoding="utf-8") as file:
         while True:
             line = file.readline()
             if not line:

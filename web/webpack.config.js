@@ -17,7 +17,7 @@ const { BundleAnalyzerPlugin } = require("webpack-bundle-analyzer");
 
 function readConfig() {
     let config = {};
-    let str = fs.readFileSync(path.resolve(__dirname, "..", "config.h"), "utf8");
+    let str = fs.readFileSync(path.resolve(__dirname, "..", "src", "config.h"), "utf8");
     let lines = str.split("\n");
     for (let line of lines) {
         line = line.trim();

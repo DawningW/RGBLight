@@ -32,7 +32,12 @@
 ### 外壳
 目前仅有投影灯形态的产品, 其模型位于 model 目录下
 
-## 编译指南
+## 编译指南 (PlatformIO)
+使用 PlatformIO 打开项目, 然后修改 config.h 中的配置, 选择对应的 Target 编译并烧录
+
+点击 Custom 中的 `Build Webpage` 目标可一键编译前端并拷贝至 data 目录 (需安装 Node.js 14 或以上版本), 点击 `Gen OTA Package` 目标可一键打包升级包到项目根目录下的 upgrade.bin (需安装 Python 3.8 或以上版本)
+
+## 编译指南 (ArduinoIDE)
 ### 安装 Arduino 和第三方库
 - [ESP8266-Arduino](https://github.com/esp8266/Arduino) (esp8266)
 - [arduino-esp32](https://github.com/espressif/arduino-esp32) (esp32)
@@ -67,7 +72,7 @@ Arduino IDE 2.2.1+ 可使用此插件为 RP2040/ESP8266/ESP32 上传 LittleFS �
 ### 打包升级包
 ArduinoOTA 是支持在线升级文件系统的, 但是遗憾的是并不支持差量更新, 为了不丢失用户配置和自定义动画等数据, 我选择把 bin 和资源文件打包为单个二进制文件, 再由上位机进行解析更新
 
-运行根目录下的 `pack_ota_bin.py` 即可打包升级包 (需要 Python 3.8 或以上版本), 生成的升级包位于 `build/upgrade.bin`, 然后使用网页前端的`在线升级`功能即可升级
+运行根目录下的 `pack_ota_bin.py` 即可打包升级包 (需要 Python 3.8 或以上版本), 生成的升级包位于 `./upgrade.bin`, 然后使用网页前端的`在线升级`功能即可升级
 
 ## 适配其他灯板
 见 Light.hpp
@@ -90,5 +95,6 @@ ArduinoOTA 是支持在线升级文件系统的, 但是遗憾的是并不支持�
 
 本项目在开发的过程中也参考了一些其他项目, 在此一并致以感谢:
 - [WLED](https://github.com/Aircoookie/WLED)
+- [PlatformIO-Starter](https://github.com/FastLED/PlatformIO-Starter)
 
 祝姐姐妹妹生日快乐!

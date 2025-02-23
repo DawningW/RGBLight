@@ -1,7 +1,7 @@
 # RGB Light
 # 炫酷 R! G! B! 灯
 
-基于 ESP8266/ESP32 使用 Arduino 开发的物联网小彩灯, 支持多种形态多种光效, 支持自定义动画, 配套自研网页/小程序/PC 客户端, ~~并支持 HomeAssistant 等智能家居平台~~(TODO)
+基于 ESP8266/ESP32/Raspberry Pi Pico 使用 Arduino 开发的物联网小彩灯, 支持多种形态多种光效, 支持自定义动画, 配套自研网页/小程序/PC 客户端, ~~并支持 HomeAssistant 等智能家居平台~~(TODO)
 
 产品特色:
 - 支持多种产品形态: 如灯带, 圆形灯盘, 方形灯板等, 提供简单易用的接口供用户自行适配 
@@ -16,7 +16,7 @@
 
 ## 所需硬件
 ### MCU
-目前已在 ESP8266/ESP32/ESP32-C3/ESP32-S3 上测试过, 理论上简单适配一下即可支持其他单片机
+目前已在 ESP8266/ESP32/ESP32-C3/ESP32-S3/Raspberry Pi Pico W 上测试过, 理论上简单适配一下即可支持其他单片机
 
 我使用的开发板为 WeMos D1 Mini, 使用 D4 脚连接 WS2812B
 
@@ -33,7 +33,7 @@
 目前仅有投影灯形态的产品, 其模型位于 model 目录下
 
 ## 编译指南 (PlatformIO)
-使用 PlatformIO 打开项目, 然后修改 config.h 中的配置, 选择对应的 Target 编译并烧录
+使用 PlatformIO 打开项目, 然后修改 config.h 中的配置, 选择对应的 Target 编译并烧录, 最后打包并上传文件系统
 
 点击 Custom 中的 `Build Webpage` 目标可一键编译前端并拷贝至 data 目录 (需安装 Node.js 14 或以上版本), 点击 `Gen OTA Package` 目标可一键打包升级包到项目根目录下的 upgrade.bin (需安装 Python 3.8 或以上版本)
 
@@ -41,6 +41,7 @@
 ### 安装 Arduino 和第三方库
 - [ESP8266-Arduino](https://github.com/esp8266/Arduino) (esp8266)
 - [arduino-esp32](https://github.com/espressif/arduino-esp32) (esp32)
+- [arduino-pico](https://github.com/earlephilhower/arduino-pico) (rp2040)
 - [FastLED](https://github.com/FastLED/FastLED)
 - [ArduinoJSON](https://github.com/bblanchon/ArduinoJson)
 - [arduinoWebSockets](https://github.com/Links2004/arduinoWebSockets)

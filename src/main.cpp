@@ -12,7 +12,7 @@
 #include <Arduino.h>
 #include <Ticker.h>
 #include <LittleFS.h>
-#if defined(ESP8266)
+#if defined(ESP8266) || defined(PICO_RP2040)
 #include <Updater.h>
 #elif defined(ESP32)
 #include <Update.h>
@@ -23,9 +23,13 @@
 #include <ESP8266mDNS.h>
 #include <ESP8266WebServer.h>
 typedef ESP8266WebServer WebServer;
-#elif defined(ESP32)
+#elif defined(ESP32) || defined(PICO_RP2040)
 #include <WiFi.h>
+#if defined(ESP32)
 #include <ESPmDNS.h>
+#else
+#include <LEAmDNS.h>
+#endif
 #include <WebServer.h>
 #include <detail/mimetable.h>
 #endif
@@ -154,7 +158,7 @@ void setWifiMode(WiFiMode_t mode) {
     MDNS.end();
 
     WiFi.mode(mode);
-    WiFi.hostname(config.hostname);
+    WiFi.hostname(C_STR(config.hostname));
     delay(100);
 
     if (mode == WIFI_AP) {
@@ -185,7 +189,7 @@ int scanWifi(JsonArray &array) {
             obj["ssid"] = WiFi.SSID(i);
             obj["rssi"] = WiFi.RSSI(i);
             obj["type"] = WiFi.encryptionType(i);
-            Serial.printf_P(PSTR("%d: %s (%d)%c\n"), i + 1, WiFi.SSID(i).c_str(), WiFi.RSSI(i),
+            Serial.printf_P(PSTR("%d: %s (%d)%c\n"), i + 1, C_STR(WiFi.SSID(i)), WiFi.RSSI(i),
                 (WiFi.encryptionType(i) == 0) ? ' ' : '*');
         }
     } else {
@@ -197,11 +201,11 @@ int scanWifi(JsonArray &array) {
 
 bool connectWifi(const String &ssid, const String &password) {
     Serial.println(F("Connecting to wlan"));
-    if (ssid.isEmpty()) {
+    if (ssid.length() == 0) {
         Serial.println(F("Wifi SSID is empty"));
         return false;
     }
-    WiFi.begin(ssid, password);
+    WiFi.begin(C_STR(ssid), C_STR(password));
     time_t t = millis();
     while (WiFi.status() != WL_CONNECTED) {
         delay(500);
@@ -322,6 +326,8 @@ void registerCommands() {
         doc["id"] = ESP.getChipId();
 #elif defined(ESP32)
         doc["id"] = ESP.getEfuseMac();
+#elif defined(PICO_RP2040)
+        doc["id"] = rp2040.getChipID();
 #endif
         doc["version"] = version;
         doc["versionCode"] = version_code;
@@ -329,6 +335,8 @@ void registerCommands() {
         doc["sdkVersion"] = ESP.getFullVersion();
 #elif defined(ESP32)
         doc["sdkVersion"] = ESP.getSdkVersion();
+#elif defined(PICO_RP2040)
+        doc["sdkVersion"] = "Arduino Pico: " ARDUINO_PICO_VERSION_STR " (sdk: " PICO_SDK_VERSION_STRING ")";
 #endif
         String str;
         serializeJson(doc, str);
@@ -348,9 +356,13 @@ void registerCommands() {
         doc["heapMaxFreeBlock"] = ESP.getMaxAllocHeap();
         doc["freePsram"] = ESP.getFreePsram();
         doc["psramMaxFreeBlock"] = ESP.getMaxAllocPsram();
+#elif defined(PICO_RP2040)
+        doc["resetReason"] = rp2040.getResetReason();
+        doc["freeHeap"] = rp2040.getFreeHeap();
+        doc["freePsram"] = rp2040.getFreePSRAMHeap();
 #endif
         doc["RSSI"] = WiFi.RSSI();
-#if defined(ESP8266)
+#if defined(ESP8266) || defined(PICO_RP2040)
         FSInfo fs_info;
         LittleFS.info(fs_info);
         doc["fsTotalSpace"] = fs_info.totalBytes;
@@ -373,10 +385,14 @@ void registerCommands() {
             doc["ip"] = IPAddress(info.ip.addr).toString();
             doc["mask"] = IPAddress(info.netmask.addr).toString();
             doc["gateway"] = IPAddress(info.gw.addr).toString();
-#elif defined(ESP32)
+#elif defined(ESP32) || defined(PICO_RP2040)
             doc["ssid"] = WiFi.softAPSSID();
             doc["ip"] = WiFi.softAPIP().toString();
+#if defined(ESP32)
             doc["mask"] = WiFi.softAPSubnetMask().toString();
+#else
+            doc["mask"] = WiFi.subnetMask().toString();
+#endif
             doc["gateway"] = WiFi.softAPIP().toString();
 #endif
         } else {
@@ -541,7 +557,7 @@ void setup() {
     gdbstub_init(); // XXX 在 esp8266-arduino 3.0+ 上疑似会严重干扰 LED 时序
 #endif
 
-#if defined(ESP8266)
+#if defined(ESP8266) || defined(PICO_RP2040)
     LittleFS.begin();
 #elif defined(ESP32)
     LittleFS.begin(true); // XXX Arduino IDE 2.0 目前无 ESP32 上传文件系统插件, 所以默认格式化, 然后用 OTA 功能上传
@@ -549,7 +565,9 @@ void setup() {
     readSettings();
 
     WiFi.persistent(false);
+#if defined(ESP8266) || defined(ESP32)
     WiFi.setAutoReconnect(true);
+#endif
     if (connectWifi(config.ssid, config.password)) {
         setWifiMode(WIFI_STA);
     } else {
@@ -582,7 +600,7 @@ void setup() {
         }, "config");
     });
     static auto checkPath = [](const String &path) {
-        if (path.isEmpty()) {
+        if (path.length() == 0) {
             webServer.send(400, MIME_TYPE(txt), PSTR("Bad request"));
             return false;
         }
@@ -599,7 +617,7 @@ void setup() {
         }
         DynamicJsonDocument doc(1024);
         JsonArray array = doc.to<JsonArray>();
-#if defined(ESP8266)
+#if defined(ESP8266) || defined(PICO_RP2040)
         Dir dir = LittleFS.openDir(path);
         while (dir.next()) {
             JsonObject obj = array.createNestedObject();
@@ -641,7 +659,7 @@ void setup() {
         HTTPUpload &upload = webServer.upload();
         if (upload.status == UPLOAD_FILE_START) {
             String path = webServer.arg("path") + "/" + upload.filename;
-#if defined(ESP8266)
+#if defined(ESP8266) || defined(PICO_RP2040)
             uploadFile = LittleFS.open(path, "w");
 #elif defined(ESP32)
             uploadFile = LittleFS.open(path, "w", true);
@@ -708,7 +726,11 @@ void setup() {
             webServer.send(200, MIME_TYPE(txt), PSTR("OK"));
             delay(2000);
             Serial.println(F("Rebooting..."));
+#if defined(ESP8266) || defined(ESP32)
             ESP.restart();
+#elif defined(PICO_RP2040)
+            rp2040.reboot();
+#endif
         } else {
             webServer.send(500, MIME_TYPE(txt), PSTR("Internal server error"));
         }
@@ -766,7 +788,7 @@ void loop() {
     dnsServer.processNextRequest();
     webServer.handleClient();
     wsServer.loop();
-#if defined(ESP8266)
+#if defined(ESP8266) || defined(PICO_RP2040)
     MDNS.update();
 #endif
 }

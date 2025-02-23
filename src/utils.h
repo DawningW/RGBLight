@@ -51,4 +51,25 @@ constexpr T sum(T *begin, T *end, typename std::decay<T>::type init) {
     return begin == end ? init : sum(begin + 1, end, init + *begin);
 }
 
+#if __cplusplus >= 201703L
+template <typename T>
+inline const char *C_STR(const T &str) {
+    if constexpr (std::is_same_v<T, String>) {
+        return str.c_str();
+    } else {
+        return str;
+    }
+}
+#else
+template <typename T>
+inline const char *C_STR(const T &str) {
+    return str.c_str();
+}
+
+template <>
+inline const char *C_STR<const char * &>(const char * &str) {
+    return str;
+}
+#endif
+
 #endif // __UTIL_H__

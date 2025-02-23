@@ -356,7 +356,7 @@ public:
         if (strlen(animName) > 0) {
             String path = String("/animations/") + animName;
             file = LittleFS.open(path, "r");
-#if defined(ESP8266)
+#if defined(ESP8266) || defined(PICO_RP2040)
             if (!file.isFile()) {
 #elif defined(ESP32)
             if (file.isDirectory()) {

@@ -220,6 +220,28 @@ public:
         return needUpdate;
     }
 
+    template <int X_COUNT, int Y_COUNT, int ARRANGEMENT>
+    bool update(LightPanel<X_COUNT, Y_COUNT, ARRANGEMENT> &light, uint32_t deltaTime) {
+        int lastTime = fps * this->lastTime;
+        bool needUpdate = false;
+        if (currentFrame % lastTime == 0) {
+            fill_solid(light.data(), light.count(), CRGB::Black);
+            int index = currentFrame / lastTime;
+            if (index > light.h() * 2 - 1) {
+                currentFrame = 0;
+                index = 0;
+            } else if (index > light.h() - 1) {
+                index = light.h() * 2 - 1 - index;
+            }
+            for (int j = 0; j < light.w(); j++) {
+                light.at(j, index) = currentColor;
+            }
+            needUpdate = true;
+        }
+        ++currentFrame;
+        return needUpdate;
+    }
+
     template <int ARRANGEMENT, int... COUNT_PER_RING>
     bool update(LightDisc<ARRANGEMENT, COUNT_PER_RING...> &light, uint32_t deltaTime) {
         int lastTime = fps * this->lastTime;
@@ -313,6 +335,19 @@ public:
     template <int COUNT, bool REVERSE>
     bool update(LightStrip<COUNT, REVERSE> &light, uint32_t deltaTime) {
         fill_rainbow(light.data(), light.count(), currentHue);
+        currentHue += delta;
+        return true;
+    }
+
+    template <int X_COUNT, int Y_COUNT, int ARRANGEMENT>
+    bool update(LightPanel<X_COUNT, Y_COUNT, ARRANGEMENT> &light, uint32_t deltaTime) {
+        CRGB rgb[light.w()];
+        fill_rainbow(rgb, light.w(), currentHue);
+        for (int i = 0; i < light.h(); i++) {
+            for (int j = 0; j < light.w(); j++) {
+                light.at(j, i) = rgb[j];
+            }
+        }
         currentHue += delta;
         return true;
     }
@@ -421,14 +456,14 @@ class MusicEffect : public Effect {
 private:
     uint8_t soundMode; // 0-电平模式 1-频谱模式
     uint8_t currentHue;
-    double currentVolume; // Must be 0~1
+    double currentVolume[LIGHT::music_bands]; // Must be 0~1
 
 public:
     MusicEffect(uint8_t mode) :
-        soundMode(mode), currentHue(0), currentVolume(0.0) {}
+        soundMode(mode), currentHue(0), currentVolume{0.0} {}
 
-    void setVolume(double volume) {
-        currentVolume = volume;
+    void setVolume(int index, double volume) {
+        currentVolume[index] = volume;
     }
 
     EffectType type() override {
@@ -442,14 +477,14 @@ public:
     template <int COUNT, bool REVERSE>
     bool update(LightStrip<COUNT, REVERSE> &light, uint32_t deltaTime) {
         if (soundMode == 0) {
-            int count = light.l() * currentVolume;
+            int count = light.l() * currentVolume[0];
             fill_solid(light.data(), light.count(), CRGB::Black);
             if (count > 0) {
                 fill_solid(light.data(), count - 1, CRGB::Green);
                 light.at(count - 1) = CRGB::Red;
             }
         } else {
-            int count = light.l() * currentVolume;
+            int count = light.l() * currentVolume[0];
             CHSV hsv(currentHue++, 255, 240);
             CRGB rgb;
             hsv2rgb_rainbow(hsv, rgb);
@@ -459,10 +494,40 @@ public:
         return true;
     }
 
+    template <int X_COUNT, int Y_COUNT, int ARRANGEMENT>
+    bool update(LightPanel<X_COUNT, Y_COUNT, ARRANGEMENT> &light, uint32_t deltaTime) {
+        if (soundMode == 0) {
+            fill_solid(light.data(), light.count(), CRGB::Black);
+            for (int x = 0; x < light.w(); x++) {
+                int count = light.h() * currentVolume[x];
+                if (count > 0) {
+                    for (int y = 0; y < count; y++) {
+                        light.at(x, y) = CRGB::Green;
+                    }
+                    light.at(x, count - 1) = CRGB::Red;
+                }
+            }
+        } else {
+            CHSV hsv(currentHue++, 255, 240);
+            CRGB rgb;
+            hsv2rgb_rainbow(hsv, rgb);
+            fill_solid(light.data(), light.count(), CRGB::Black);
+            for (int x = 0; x < light.w(); x++) {
+                int count = light.h() * currentVolume[x];
+                if (count > 0) {
+                    for (int y = 0; y < count; y++) {
+                        light.at(x, y) = rgb;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
     template <int ARRANGEMENT, int... COUNT_PER_RING>
     bool update(LightDisc<ARRANGEMENT, COUNT_PER_RING...> &light, uint32_t deltaTime) {
         if (soundMode == 0) {
-            int r = light.r() * currentVolume;
+            int r = light.r() * currentVolume[0];
             fill_solid(light.data(), light.count(), CRGB::Black);
             if (r > 0) {
                 for (int i = 0; i < r; i++) {
@@ -476,7 +541,7 @@ public:
                 }
             }
         } else {
-            int r = ceil(light.r() * currentVolume);
+            int r = ceil(light.r() * currentVolume[0]);
             CHSV hsv(currentHue++, 255, 240);
             CRGB rgb;
             hsv2rgb_rainbow(hsv, rgb);
@@ -484,7 +549,7 @@ public:
             for (int i = light.r() - r; i < light.r(); i++) {
                 CRGB temp = rgb;
                 if (i == light.r() - r) {
-                    temp.nscale8_video(255 * (currentVolume - floor(light.r() * currentVolume) / light.r()) * light.r());
+                    temp.nscale8_video(255 * (currentVolume[0] - floor(light.r() * currentVolume[0]) / light.r()) * light.r());
                 }
                 for (int j = 0; j < light.l(i); j++) {
                     light.at(i, j) = temp;

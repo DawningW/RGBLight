@@ -19,6 +19,8 @@ private:
     CRGB leds[COUNT];
 
 public:
+    static constexpr int music_bands = 1;
+
     CRGB *data() override {
         return leds;
     }
@@ -55,6 +57,8 @@ private:
     CRGB leds[X_COUNT * Y_COUNT];
 
 public:
+    static constexpr int music_bands = X_COUNT;
+
     CRGB *data() override {
         return leds;
     }
@@ -110,6 +114,8 @@ private:
     CRGB leds[led_count];
 
 public:
+    static constexpr int music_bands = 1;
+
     CRGB *data() override {
         return leds;
     }
@@ -144,6 +150,8 @@ private:
     CRGB leds[X_COUNT * Y_COUNT * Z_COUNT];
 
 public:
+    static constexpr int music_bands = X_COUNT * Y_COUNT;
+
     CRGB *data() override {
         return leds;
     }

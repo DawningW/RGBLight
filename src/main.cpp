@@ -243,7 +243,17 @@ void updateLight() {
 void handleCommand(SenderFunc sender, char *line) {
     if (lightEffect->type() == MUSIC) {
         if (!isalpha(line[0])) { // 假定所有命令都是字母开头且以字母开头的一定是命令
-            ((MusicEffect<LIGHT_TYPE> *) lightEffect)->setVolume(atof(line));
+            char *p = line;
+            for (int i = 0; ; i++) {
+                char *q = strchr(p, ',');
+                if (q) {
+                    *q = '\0';
+                }
+                float value = atof(p);
+                ((MusicEffect<LIGHT_TYPE> *) lightEffect)->setVolume(i, value);
+                if (!q) break;
+                p = q + 1;
+            }
             return;
         }
     } else if (lightEffect->type() == CUSTOM) {

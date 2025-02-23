@@ -13,6 +13,11 @@ let mediaStream;
 let audioSource;
 let timerId;
 
+let outBands = 1;
+if (LIGHT_TYPE.type == "LightPanel") {
+    outBands = parseInt(LIGHT_TYPE.args[0]); // width of panel
+}
+
 // cubic-bezier(0.65, 0, 0.35, 1)
 function easeInOutCubic(x) {
     return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
@@ -44,8 +49,8 @@ function startRecord(onData, onError) {
                 sampleRate: ctx.sampleRate,
                 fftSize: analyser.fftSize,
                 startFrequency: 150,
-                endFrequency: 4500,
-                outBandsQty: 1,
+                endFrequency: 6000,
+                outBandsQty: outBands,
                 tWeight: true,
                 aWeight: true
             });
@@ -57,8 +62,8 @@ function startRecord(onData, onError) {
         timerId = setInterval(() => {
             analyser.getByteFrequencyData(frequencies);
             let result = soundProcessor.process(frequencies);
-            let scale = easeInOutCubic(result[0] / 255);
-            onData(scale);
+            let scaledResult = result.map((value) => easeInOutCubic(value / 255));
+            onData(scaledResult);
         }, 50);
     }).catch((err) => {
         onError("请共享整个屏幕并勾选同时共享系统音频以便使用音乐律动模式, 错误详情: " + err.message);

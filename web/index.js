@@ -203,7 +203,7 @@ async function updateMode(newModeButton) {
         animName.value = lastValue;
     } else if (mode == "music") {
         startRecord(function(result) {
-            cconsole.execute(String(Number(result).toFixed(2)));
+            cconsole.execute(result.map((value) => String(Number(value).toFixed(2))).join(","));
         }, function(message) {
             stopRecord();
             $dialog("音乐律动初始化失败", message, null, updateMode.bind(null, oldModeButton));
@@ -518,7 +518,7 @@ document.getElementById("upgrade").onclick = function() {
                 throw new Error("无效的升级包");
             }
             let version = view.getUint32(4, true);
-            if (version <= window.version["versionCode"]) {
+            if (!window.force_upgrade && version <= window.version["versionCode"]) {
                 throw new Error("该升级包比当前版本旧, 无法安装");
             }
             let file_count = view.getUint32(8, true);

@@ -4,20 +4,40 @@ import { getPointerParts } from '@theatre/dataverse';
 
 const studioPrivate = window.__TheatreJS_StudioBundle._studio;
 let projectId = "";
+let project = null;
 let objs = [];
 
 let leds = [];
+let ledCounts = 0;
 if (LIGHT_TYPE.type == "LightStrip") {
     leds = [parseInt(LIGHT_TYPE.args[0])];
+    ledCounts = leds[0];
+} else if (LIGHT_TYPE.type == "LightPanel") {
+    leds = [parseInt(LIGHT_TYPE.args[0]), parseInt(LIGHT_TYPE.args[1])];
+    ledCounts = leds[0] * leds[1];
 } else if (LIGHT_TYPE.type == "LightDisc") {
     leds = LIGHT_TYPE.args.slice(1).map((s) => parseInt(s));
+    ledCounts = leds.reduce((a, b) => a + b, 0);
 }
-let ledCounts = leds.reduce((a, b) => a + b, 0);
 const renderLeds = () => {
     if (LIGHT_TYPE.type == "LightStrip") {
         return `
             <div id="leds" style="display: flex; flex-direction: row; gap: 5px;">
                 ${Array(ledCounts).fill().map((_, i) => `<div style="width: 20px; height: 20px;"></div>`).join("")}
+            </div>
+        `;
+    } else if (LIGHT_TYPE.type == "LightPanel") {
+        return `
+            <div id="leds" style="display: grid; grid-template-columns: repeat(${leds[0]}, 1fr); grid-template-rows: repeat(${leds[1]}, 1fr); gap: 1px;">
+                ${Array(ledCounts).fill().map((_, i) => {
+                    let x = i % leds[0];
+                    let y = Math.floor(i / leds[0]);
+                    if (y % 2 == 1) {
+                        x = leds[0] - x - 1;
+                    }
+                    y = leds[1] - y - 1;
+                    return `<div style="width: 20px; height: 20px; order: ${y * leds[0] + x}"></div>`;
+                }).join("")}
             </div>
         `;
     } else if (LIGHT_TYPE.type == "LightDisc") {
@@ -48,7 +68,13 @@ studio.extend({
                     type: 'Icon',
                     title: 'Save',
                     svgSource: '💾',
-                    onClick: () => saveAnim(projectId)
+                    onClick: () => saveAnim(project, projectId)
+                },
+                {
+                    type: 'Icon',
+                    title: 'Import Pixel Art',
+                    svgSource: '🖼️',
+                    onClick: () => importPixelArt()
                 },
                 {
                     type: 'Icon',
@@ -95,7 +121,7 @@ async function loadAnim(name) {
     } catch (_) {}
 }
 
-async function saveAnim(name) {
+async function saveAnim(project, name) {
     $toast("loading", "保存动画中", -1);
 
     try {
@@ -108,7 +134,7 @@ async function saveAnim(name) {
         
         // 保存板端使用的逐帧动画
         const data = [];
-        const sequence = getProject(name).sheet("Light Animation").sequence;
+        const sequence = project.sheet("Light Animation").sequence;
         const pos = sequence.position;
         sequence.position = 0;
         while (sequence.position < val(sequence.pointer.length)) {
@@ -134,6 +160,47 @@ async function saveAnim(name) {
     }
 }
 
+async function importPixelArt() {
+    if (LIGHT_TYPE.type != "LightPanel") {
+        $toast("fail", "当前仅矩形灯板支持导入像素画");
+        return;
+    }
+
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.onchange = async () => {
+        const file = input.files[0];
+        if (!file) return;
+
+        const image = new Image();
+        image.src = URL.createObjectURL(file);
+        image.onload = () => {
+            const canvas = document.createElement("canvas");
+            canvas.width = leds[0];
+            canvas.height = leds[1];
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(image, 0, 0, leds[0], leds[1]);
+            const data = ctx.getImageData(0, 0, leds[0], leds[1]).data;
+
+            const sequence = project.sheet("Light Animation").sequence;
+            studio.transaction(({ set, unset }) => {
+                for (let i = 0; i < ledCounts; i++) {
+                    let x = i % leds[0];
+                    let y = Math.floor(i / leds[0]);
+                    if (y % 2 == 1) {
+                        x = leds[0] - x - 1;
+                    }
+                    y = leds[1] - y - 1;
+                    let di = (x + y * leds[0]) * 4;
+                    set(objs[i].props.color, { r: data[di] / 255, g: data[di + 1] / 255, b: data[di + 2] / 255, a: 1 });
+                }
+            });
+        };
+    };
+    input.click();
+}
+
 export async function editAnimation(name) {
     const hideToast = $toast("loading", "读取动画中", -1);
 
@@ -147,7 +214,7 @@ export async function editAnimation(name) {
 
     const state = await loadAnim(name);
     studio.ui.restore();
-    const project = getProject(name, { state });
+    project = getProject(name, { state });
     projectId = project.address.projectId;
     const sheet = project.sheet("Light Animation");
 
@@ -180,9 +247,9 @@ export async function editAnimation(name) {
         for (const obj of objs) {
             studioPrivate.transaction(({ stateEditors }) => {
                 const {path, root} = getPointerParts(obj.props.color);
-                const propAdress = {...root.address, pathToProp: path};
+                const propAddress = {...root.address, pathToProp: path};
                 stateEditors.coreByProject.historic.sheetsById.sequence.setPrimitivePropAsSequenced(
-                    propAdress,
+                    propAddress,
                 );
             }, false);
         }

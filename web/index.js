@@ -351,6 +351,10 @@ function refreshFileList(refreshSpace = false) {
                             if (!response.ok) return;
                             refreshFileList(true);
                         });
+                        if (viewPath.includes("animations/") && file["name"].endsWith(".json")) {
+                            let bin = "." + file["name"].replace(".json", ".bin");
+                            fetch("/delete?path=" + viewPath.join("") + bin);
+                        }
                     }
                     ft.appendChild(del);
                 }

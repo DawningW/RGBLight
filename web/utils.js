@@ -26,7 +26,7 @@ function zfill(str, width) {
  * @returns {String} hex color string
  */
 function rgb2hex(r, g, b) {
-    return "#" + zfill(r.toString(16), 2) + zfill(g.toString(16), 2) + zfill(b.toString(16), 2);
+    return "#" + zfill((r << 16 | g << 8 | b).toString(16), 6);
 }
 
 /**

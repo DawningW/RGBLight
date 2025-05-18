@@ -1,6 +1,7 @@
 import { getProject, types, val } from "@theatre/core";
 import studio from "@theatre/studio";
 import { getPointerParts } from '@theatre/dataverse';
+import { rgb2hex } from "./utils";
 
 const studioPrivate = window.__TheatreJS_StudioBundle._studio;
 let projectId = "";
@@ -75,6 +76,12 @@ studio.extend({
                     title: 'Import Pixel Art',
                     svgSource: '🖼️',
                     onClick: () => importPixelArt()
+                },
+                {
+                    type: 'Icon',
+                    title: 'Export Current Frame',
+                    svgSource: '📸',
+                    onClick: () => exportCurrentFrame()
                 },
                 {
                     type: 'Icon',
@@ -199,6 +206,22 @@ async function importPixelArt() {
         };
     };
     input.click();
+}
+
+async function exportCurrentFrame() {
+    const data = [];
+    const sequence = project.sheet("Light Animation").sequence;
+    for (const obj of objs) {
+        const { r, g, b, a } = val(obj.props.color);
+        data.push(rgb2hex(parseInt(r * 255), parseInt(g * 255), parseInt(b * 255)));
+    }
+    const text = data.join("\n");
+    try {
+        await navigator.clipboard.writeText(text);
+        $toast("success", "已将选中帧拷贝到剪贴板");
+    } catch (e) {
+        $toast("fail", "将选中帧拷贝到粘贴板失败");
+    }
 }
 
 export async function editAnimation(name) {

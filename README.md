@@ -33,7 +33,7 @@
 目前仅有投影灯形态的产品, 其模型位于 model 目录下
 
 ## 编译指南 (PlatformIO)
-使用 PlatformIO 打开项目, 然后修改 config.h 中的配置, 选择对应的 Target 编译并烧录, 最后打包并上传文件系统
+使用 PlatformIO 打开项目, 然后修改 src/config.h 中的配置, 选择对应的 Target 编译并烧录, 最后打包并上传文件系统
 
 点击 Custom 中的 `Build Webpage` 目标可一键编译前端并拷贝至 data 目录 (需安装 Node.js 14 或以上版本), 点击 `Gen OTA Package` 目标可一键打包升级包到项目根目录下的 upgrade.bin (需安装 Python 3.8 或以上版本)
 
@@ -51,7 +51,7 @@
 **注意**: 如果你在 ESP32-C3 上遇到了第一个灯不亮, 其余灯随机闪烁的问题, 请更新 FastLED 至 3.7.0 版本, 详见 [FastLED/FastLED#1349](https://github.com/FastLED/FastLED/issues/1349)
 
 ### 修改配置
-根据您的需求修改 config.h 中的配置
+根据您的需求修改 src/config.h 中的配置
 
 ### 编译前端网页 (可选)
 预编译好的前端网页已位于 data/www 目录下, 如果你不需要修改前端网页, 则可以跳过这一步

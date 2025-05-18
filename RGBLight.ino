@@ -3,4 +3,4 @@
 // Code should be written in src folder.
 
 // 在 src/config.h 中修改配置
-#include "config.h"
+#include "src/config.h"
